@@ -434,8 +434,7 @@ const AdminPanel = () => {
                 <th className="text-left py-3 px-4">Customer</th>
                 <th className="text-left py-3 px-4">Username</th>
                 <th className="text-left py-3 px-4">Password</th>
-                <th className="text-left py-3 px-4">Worker Name</th>
-                <th className="text-left py-3 px-4">API Key</th>
+                <th className="text-left py-3 px-4">Worker Name (ViaBTC)</th>
                 <th className="text-right py-3 px-4">Actions</th>
               </tr>
             </thead>
@@ -445,10 +444,7 @@ const AdminPanel = () => {
                   <td className="py-3 px-4 text-white">{getCustomerName(account.customer_id)}</td>
                   <td className="py-3 px-4 text-gray-400">{account.username}</td>
                   <td className="py-3 px-4 font-mono text-gray-400">{account.password}</td>
-                  <td className="py-3 px-4 text-gray-400">{account.worker_name || "-"}</td>
-                  <td className="py-3 px-4 font-mono text-xs text-gray-500">
-                    {account.viabtc_api_key ? account.viabtc_api_key.substring(0, 8) + "..." : <span className="text-red-400">Not set</span>}
-                  </td>
+                  <td className="py-3 px-4 text-[#00C2FF] font-mono">{account.worker_name || <span className="text-red-400">Not set</span>}</td>
                   <td className="py-3 px-4 text-right">
                     <Button size="icon" variant="ghost" onClick={() => { 
                       setEditingAccount(account); 
@@ -471,7 +467,7 @@ const AdminPanel = () => {
               ))}
               {accounts.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-gray-500">
+                  <td colSpan={5} className="py-8 text-center text-gray-500">
                     No accounts yet. Click "Auto-Create All" to generate accounts for all customers.
                   </td>
                 </tr>
@@ -479,6 +475,9 @@ const AdminPanel = () => {
             </tbody>
           </table>
         </div>
+        <p className="text-xs text-gray-500 mt-3">
+          Set the <span className="text-[#00C2FF]">Worker Name</span> to match the customer's ViaBTC worker name exactly
+        </p>
       </div>
 
       {/* Machine Status Updates */}
