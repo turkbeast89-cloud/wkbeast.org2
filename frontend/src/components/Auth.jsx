@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Lock } from "lucide-react";
 
-const PASSWORD = "1122";
+const PASSWORD = "127512";
 const AUTH_KEY = "wkbeast_auth_token";
 
 export const useAuth = () => {
