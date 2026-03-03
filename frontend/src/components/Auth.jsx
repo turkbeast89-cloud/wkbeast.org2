@@ -97,6 +97,16 @@ export const LoginScreen = ({ onLogin }) => {
         <p className="text-center text-gray-600 text-xs mt-8">
           Your device will be remembered
         </p>
+
+        <div className="mt-6 pt-6 border-t border-[#27272A]">
+          <p className="text-center text-gray-500 text-sm mb-2">Are you a customer?</p>
+          <a 
+            href="/portal"
+            className="block w-full py-3 text-center bg-[#1A1A1A] border border-[#27272A] text-white rounded-xl hover:bg-[#27272A] transition-colors"
+          >
+            Customer Portal Login
+          </a>
+        </div>
       </div>
 
       <style>{`
