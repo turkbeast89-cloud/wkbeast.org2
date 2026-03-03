@@ -238,10 +238,10 @@ const CustomerDashboard = ({ session, onLogout }) => {
   const customerMachinesOnline = validWorkers.filter(w => w.worker_status === "active").length;
   const customerMachinesTotal = validWorkers.length;
 
-  // Calculate total hashrate from workers
-  const calculateTotalHashrate = () => {
+  // Calculate customer's total hashrate from their workers
+  const calculateCustomerHashrate = () => {
     if (!validWorkers || validWorkers.length === 0) {
-      return farm_stats?.total_hashrate || "850 TH/s";
+      return null;
     }
     
     let totalHashrate = 0;
@@ -260,6 +260,17 @@ const CustomerDashboard = ({ session, onLogout }) => {
     } else {
       return `${totalHashrate} H/s`;
     }
+  };
+
+  // Calculate farm hashrate with fluctuation (based on online machine fluctuation)
+  const getFarmHashrate = () => {
+    const baseHashrate = parseFloat(farm_stats?.total_hashrate?.replace(/[^0-9.]/g, '') || 850);
+    const unit = farm_stats?.total_hashrate?.replace(/[0-9.\s]/g, '') || 'TH/s';
+    const fluctuation = farm_stats?.fluctuation || 5;
+    // Fluctuate hashrate proportionally to machine fluctuation (roughly 0.2% per machine)
+    const hashFluctuation = (fluctuation * 0.2 / 100) * baseHashrate;
+    const fluctuatedHashrate = baseHashrate + (Math.random() * 2 - 1) * hashFluctuation;
+    return `${fluctuatedHashrate.toFixed(1)} ${unit}`;
   };
 
   return (
@@ -384,7 +395,7 @@ const CustomerDashboard = ({ session, onLogout }) => {
                 <span className="text-gray-400 text-sm">Hashrate</span>
               </div>
               <p className="text-4xl md:text-5xl font-bold text-[#00C2FF]">
-                {calculateTotalHashrate()}
+                {getFarmHashrate()}
               </p>
               <p className="text-gray-500 text-sm mt-1">total</p>
             </div>
@@ -401,12 +412,20 @@ const CustomerDashboard = ({ session, onLogout }) => {
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
                 <Wifi className="text-[#00C2FF]" size={20} />
-                <h2 className="text-lg font-bold text-white">Live Worker Status</h2>
-                <span className="text-xs bg-[#00C2FF]/20 text-[#00C2FF] px-2 py-0.5 rounded">ViaBTC</span>
+                <h2 className="text-lg font-bold text-white">Your Machines</h2>
+                <span className="text-xs bg-[#00C2FF]/20 text-[#00C2FF] px-2 py-0.5 rounded">Live</span>
               </div>
-              <span className="text-xs text-gray-500">
-                {workerData.active || 0} online / {workerData.workers.filter(w => w.worker_status !== "invalid").length} total
-              </span>
+              <div className="flex items-center gap-4">
+                {calculateCustomerHashrate() && (
+                  <div className="flex items-center gap-1 text-sm">
+                    <Zap size={14} className="text-[#00C2FF]" />
+                    <span className="text-[#00C2FF] font-bold">{calculateCustomerHashrate()}</span>
+                  </div>
+                )}
+                <span className="text-xs text-gray-500">
+                  {customerMachinesOnline} online / {customerMachinesTotal} total
+                </span>
+              </div>
             </div>
             
             <div className="space-y-3">
