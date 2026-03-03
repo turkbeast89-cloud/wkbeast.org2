@@ -28,15 +28,26 @@ const CustomerDashboard = ({ session, onLogout }) => {
       setDashboard(dashData);
       setPrices(pricesData);
       
-      // Fetch ALL worker data from ViaBTC
-      try {
-        const workerRes = await fetch(`${API}/viabtc/workers?coin=LTC`);
-        const workerInfo = await workerRes.json();
-        if (workerInfo.success) {
-          setWorkerData(workerInfo);
+      // Fetch worker data from ViaBTC - only for this customer's worker_name
+      const workerName = session.account?.worker_name;
+      if (workerName) {
+        try {
+          const workerRes = await fetch(`${API}/portal/worker-status/${encodeURIComponent(workerName)}?coin=LTC`);
+          const workerInfo = await workerRes.json();
+          if (workerInfo.success && workerInfo.worker) {
+            // Only show THIS customer's worker, not all workers
+            setWorkerData({
+              success: true,
+              workers: [workerInfo.worker], // Only their worker
+              total: 1,
+              active: workerInfo.worker.worker_status === "active" ? 1 : 0
+            });
+          } else {
+            setWorkerData(null);
+          }
+        } catch (e) {
+          console.log("Could not fetch worker data:", e);
         }
-      } catch (e) {
-        console.log("Could not fetch worker data:", e);
       }
     } catch (e) {
       console.error("Failed to load dashboard:", e);
