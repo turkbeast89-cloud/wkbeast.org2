@@ -277,32 +277,43 @@ const CustomerDashboard = ({ session, onLogout }) => {
     return results;
   };
 
-  // Calculate farm hashrate with fluctuation (based on online machine fluctuation)
-  // Returns an array of per-coin hashrates for the Farm Status display (cosmetic stats)
+  // Calculate farm hashrate DYNAMICALLY based on online machines
+  // 90% LTC miners × 16 GH/s each, 10% KAS miners × 21 TH/s each
+  // Hashrate fluctuates with machine count fluctuation
   const getFarmHashrateByCoin = () => {
-    // Parse farm_stats.total_hashrate_by_coin if available (e.g., "LTC:500 GH/s,KAS:350 TH/s")
-    // Otherwise use legacy single hashrate for backwards compatibility
+    const onlineMachines = farm_stats?.machines_online_display || farm_stats?.machines_online || 2430;
     const fluctuation = farm_stats?.fluctuation || 5;
     
-    if (farm_stats?.total_hashrate_by_coin) {
-      // New format: "LTC:500 GH/s,KAS:350 TH/s"
-      const parts = farm_stats.total_hashrate_by_coin.split(',').map(s => s.trim()).filter(Boolean);
-      return parts.map(part => {
-        const [coin, hashrateStr] = part.split(':').map(s => s.trim());
-        const baseHashrate = parseFloat(hashrateStr?.replace(/[^0-9.]/g, '') || 0);
-        const unit = hashrateStr?.replace(/[0-9.\s]/g, '') || 'TH/s';
-        const hashFluctuation = (fluctuation * 0.2 / 100) * baseHashrate;
-        const fluctuatedHashrate = baseHashrate + (Math.random() * 2 - 1) * hashFluctuation;
-        return { coin, hashrate: `${fluctuatedHashrate.toFixed(1)} ${unit}` };
-      });
+    // 90% LTC, 10% KAS
+    const ltcMachines = Math.floor(onlineMachines * 0.9);
+    const kasMachines = onlineMachines - ltcMachines;
+    
+    // LTC miners: ~16 GH/s per machine (L9 type)
+    const ltcHashratePerMachine = 16; // GH/s
+    const ltcTotalGHs = ltcMachines * ltcHashratePerMachine;
+    // Add small random fluctuation per machine (±0.5 GH/s variation)
+    const ltcFluctuation = (Math.random() * 2 - 1) * ltcMachines * 0.5;
+    const ltcFinalGHs = ltcTotalGHs + ltcFluctuation;
+    
+    // KAS miners: ~21 TH/s per machine (KS5 Pro type)
+    const kasHashratePerMachine = 21; // TH/s
+    const kasTotalTHs = kasMachines * kasHashratePerMachine;
+    // Add small random fluctuation per machine (±0.3 TH/s variation)
+    const kasFluctuation = (Math.random() * 2 - 1) * kasMachines * 0.3;
+    const kasFinalTHs = kasTotalTHs + kasFluctuation;
+    
+    // Convert LTC to TH/s if it's large enough, otherwise keep as GH/s
+    let ltcDisplay;
+    if (ltcFinalGHs >= 1000) {
+      ltcDisplay = `${(ltcFinalGHs / 1000).toFixed(2)} TH/s`;
+    } else {
+      ltcDisplay = `${ltcFinalGHs.toFixed(1)} GH/s`;
     }
     
-    // Fallback to legacy single hashrate
-    const baseHashrate = parseFloat(farm_stats?.total_hashrate?.replace(/[^0-9.]/g, '') || 850);
-    const unit = farm_stats?.total_hashrate?.replace(/[0-9.\s]/g, '') || 'TH/s';
-    const hashFluctuation = (fluctuation * 0.2 / 100) * baseHashrate;
-    const fluctuatedHashrate = baseHashrate + (Math.random() * 2 - 1) * hashFluctuation;
-    return [{ coin: 'Total', hashrate: `${fluctuatedHashrate.toFixed(1)} ${unit}` }];
+    return [
+      { coin: 'LTC', hashrate: ltcDisplay },
+      { coin: 'KAS', hashrate: `${kasFinalTHs.toFixed(1)} TH/s` }
+    ];
   };
   
   // Get customer's total hashrate display string (for the header)
