@@ -1,34 +1,221 @@
-.App-logo {
-    height: 40vmin;
-    pointer-events: none;
+/* App-specific styles */
+
+.app-container {
+  min-height: 100vh;
+  background-color: #050505;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-    .App-logo {
-        animation: App-logo-spin infinite 20s linear;
-    }
+/* Sidebar styles */
+.sidebar {
+  width: 240px;
+  background-color: #0F0F0F;
+  border-right: 1px solid #27272A;
+  height: 100vh;
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 40;
 }
 
-.App-header {
-    background-color: #0f0f10;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    font-size: calc(10px + 2vmin);
-    color: white;
+.sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  color: #A1A1AA;
+  text-decoration: none;
+  transition: all 0.2s ease;
+  border-radius: 8px;
+  margin: 0.25rem 0.5rem;
 }
 
-.App-link {
-    color: #61dafb;
+.sidebar-link:hover {
+  background-color: #1A1A1A;
+  color: #FFFFFF;
 }
 
-@keyframes App-logo-spin {
-    from {
-        transform: rotate(0deg);
-    }
-    to {
-        transform: rotate(360deg);
-    }
+.sidebar-link.active {
+  background-color: rgba(0, 224, 84, 0.1);
+  color: #00E054;
+  border: 1px solid rgba(0, 224, 84, 0.2);
+}
+
+/* Main content area */
+.main-content {
+  margin-left: 240px;
+  padding: 2rem;
+  min-height: 100vh;
+}
+
+@media (max-width: 768px) {
+  .sidebar {
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+  }
+  
+  .sidebar.open {
+    transform: translateX(0);
+  }
+  
+  .main-content {
+    margin-left: 0;
+    padding: 1rem;
+  }
+}
+
+/* Stat cards */
+.stat-card {
+  background-color: #0F0F0F;
+  border: 1px solid #27272A;
+  border-radius: 12px;
+  padding: 1.5rem;
+  transition: all 0.3s ease;
+}
+
+.stat-card:hover {
+  border-color: rgba(0, 224, 84, 0.5);
+  transform: translateY(-2px);
+}
+
+.stat-card.profit {
+  border-color: rgba(0, 224, 84, 0.3);
+}
+
+.stat-card.cost {
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.stat-card.revenue {
+  border-color: rgba(0, 194, 255, 0.3);
+}
+
+/* Charts container */
+.chart-container {
+  background-color: #0F0F0F;
+  border: 1px solid #27272A;
+  border-radius: 12px;
+  padding: 1.5rem;
+}
+
+/* WhatsApp sender */
+.whatsapp-card {
+  background-color: #0F0F0F;
+  border: 1px solid #27272A;
+  border-radius: 12px;
+  padding: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: all 0.2s ease;
+}
+
+.whatsapp-card:hover {
+  border-color: #25D366;
+  background-color: rgba(37, 211, 102, 0.05);
+}
+
+/* Payment grid */
+.payment-grid {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.payment-cell {
+  padding: 0.5rem;
+  border-radius: 6px;
+  text-align: center;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.payment-cell.paid {
+  background-color: rgba(0, 224, 84, 0.2);
+  color: #00E054;
+}
+
+.payment-cell.unpaid {
+  background-color: rgba(239, 68, 68, 0.2);
+  color: #EF4444;
+}
+
+.payment-cell.paused {
+  background-color: rgba(234, 179, 8, 0.2);
+  color: #EAB308;
+}
+
+/* Machine badge */
+.machine-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  background-color: #1A1A1A;
+  border: 1px solid #27272A;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Modal overlay */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(4px);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-content {
+  background-color: #0F0F0F;
+  border: 1px solid #27272A;
+  border-radius: 12px;
+  padding: 1.5rem;
+  max-width: 500px;
+  width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+/* Empty state */
+.empty-state {
+  text-align: center;
+  padding: 3rem;
+  color: #A1A1AA;
+}
+
+.empty-state svg {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 1rem;
+  opacity: 0.5;
+}
+
+/* Loading skeleton */
+.skeleton {
+  background: linear-gradient(90deg, #1A1A1A 25%, #27272A 50%, #1A1A1A 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 8px;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Toast customization */
+[data-sonner-toaster] {
+  --normal-bg: #0F0F0F;
+  --normal-border: #27272A;
+  --normal-text: #FFFFFF;
+  --success-bg: rgba(0, 224, 84, 0.1);
+  --success-border: rgba(0, 224, 84, 0.3);
+  --success-text: #00E054;
+  --error-bg: rgba(239, 68, 68, 0.1);
+  --error-border: rgba(239, 68, 68, 0.3);
+  --error-text: #EF4444;
 }
