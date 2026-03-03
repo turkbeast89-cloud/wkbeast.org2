@@ -311,8 +311,8 @@ const CustomerDashboard = ({ session, onLogout }) => {
     }
     
     return [
-      { coin: 'LTC', hashrate: ltcDisplay, machines: ltcMachines },
-      { coin: 'KAS', hashrate: `${kasFinalTHs.toFixed(1)} TH/s`, machines: kasMachines }
+      { coin: 'LTC', hashrate: ltcDisplay, machines: ltcMachines, machineType: 'L9' },
+      { coin: 'KAS', hashrate: `${kasFinalTHs.toFixed(1)} TH/s`, machines: kasMachines, machineType: 'KS5 Pro' }
     ];
   };
   
@@ -480,7 +480,9 @@ const CustomerDashboard = ({ session, onLogout }) => {
                   <div key={idx} className="flex items-center justify-center gap-2">
                     <span className="text-xs font-bold text-gray-500 uppercase">{item.coin}:</span>
                     <span className="text-2xl md:text-3xl font-bold text-[#00C2FF]">{item.hashrate}</span>
-                    <span className="text-xs text-gray-600">({item.machines.toLocaleString()})</span>
+                    <span className="text-xs text-gray-400">
+                      ({item.machines.toLocaleString()} {item.machineType})
+                    </span>
                   </div>
                 ))}
               </div>
