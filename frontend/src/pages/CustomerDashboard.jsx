@@ -73,17 +73,23 @@ const PaymentCountdown = ({ deadline }) => {
   );
 };
 
-// Get next payment deadline (2nd of next month at 12:00)
-const getPaymentDeadline = () => {
+// Get next payment deadline (2nd of current/next month at 12:00)
+const getPaymentDeadline = (hasPendingPayment) => {
   const now = new Date();
-  let deadline = new Date(now.getFullYear(), now.getMonth(), 2, 12, 0, 0);
+  const currentMonthDeadline = new Date(now.getFullYear(), now.getMonth(), 2, 12, 0, 0);
   
-  // If we're past the 2nd of this month, deadline is 2nd of next month
-  if (now > deadline) {
-    deadline = new Date(now.getFullYear(), now.getMonth() + 1, 2, 12, 0, 0);
+  // If payment is pending and we're past the 2nd, they're overdue
+  if (hasPendingPayment && now > currentMonthDeadline) {
+    return currentMonthDeadline; // Return past deadline to show OVERDUE
   }
   
-  return deadline;
+  // If we're before the 2nd, deadline is this month
+  if (now < currentMonthDeadline) {
+    return currentMonthDeadline;
+  }
+  
+  // Otherwise, deadline is next month's 2nd
+  return new Date(now.getFullYear(), now.getMonth() + 1, 2, 12, 0, 0);
 };
 
 const CustomerDashboard = ({ session, onLogout }) => {
@@ -93,7 +99,6 @@ const CustomerDashboard = ({ session, onLogout }) => {
   const [accountData, setAccountData] = useState(session.account);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [paymentDeadline] = useState(getPaymentDeadline());
 
   const fetchData = async () => {
     try {
@@ -224,6 +229,13 @@ const CustomerDashboard = ({ session, onLogout }) => {
   const currentMonthPayment = payments?.find(p => p.month === currentMonth);
   const hasPendingPayment = currentMonthPayment?.status === "unpaid" || !currentMonthPayment;
   const isPaid = currentMonthPayment?.status === "paid";
+  
+  // Get payment deadline based on payment status
+  const paymentDeadline = getPaymentDeadline(hasPendingPayment && !isPaid);
+
+  // Calculate customer's machine stats from ViaBTC workers
+  const customerMachinesOnline = workerData?.active || 0;
+  const customerMachinesTotal = workerData?.total || 0;
 
   return (
     <div className="min-h-screen bg-[#050505]">
@@ -239,7 +251,17 @@ const CustomerDashboard = ({ session, onLogout }) => {
               <p className="text-xs text-gray-500">Welcome, {customer?.name}</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-4">
+            {/* Customer's machines status */}
+            {workerData?.success && (
+              <div className="hidden sm:flex items-center gap-2 px-3 py-1 bg-[#0A0A0A] rounded-lg border border-[#27272A]">
+                <div className={`w-2 h-2 rounded-full ${customerMachinesOnline > 0 ? 'bg-[#00E054] animate-pulse' : 'bg-red-500'}`}></div>
+                <span className="text-sm">
+                  <span className="text-[#00E054] font-bold">{customerMachinesOnline}</span>
+                  <span className="text-gray-500"> / {customerMachinesTotal} machines</span>
+                </span>
+              </div>
+            )}
             <Button
               onClick={handleRefresh}
               variant="outline"
