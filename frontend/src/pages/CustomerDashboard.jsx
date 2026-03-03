@@ -12,11 +12,23 @@ const CustomerDashboard = ({ session, onLogout }) => {
   const [dashboard, setDashboard] = useState(null);
   const [prices, setPrices] = useState({ ltc: 0, kas: 0, zec: 0 });
   const [workerData, setWorkerData] = useState(null);
+  const [accountData, setAccountData] = useState(session.account); // Use fresh account data
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const fetchData = async () => {
     try {
+      // First, refresh account data to get latest API key
+      const accountRes = await fetch(`${API}/customer-accounts`);
+      const allAccounts = await accountRes.json();
+      const freshAccount = allAccounts.find(a => a.id === session.account?.id);
+      if (freshAccount) {
+        setAccountData(freshAccount);
+        // Update localStorage with fresh data
+        const updatedSession = { ...session, account: freshAccount };
+        localStorage.setItem("customer_session", JSON.stringify(updatedSession));
+      }
+      
       const [dashRes, pricesRes] = await Promise.all([
         fetch(`${API}/portal/dashboard/${session.customer.id}`),
         fetch(`${API}/portal/crypto-prices`)
@@ -28,9 +40,9 @@ const CustomerDashboard = ({ session, onLogout }) => {
       setDashboard(dashData);
       setPrices(pricesData);
       
-      // Fetch workers using customer's own API key (stored in their account)
-      const accountId = session.account?.id;
-      const hasApiKey = session.account?.viabtc_api_key;
+      // Fetch workers using customer's own API key (use fresh account data)
+      const accountId = freshAccount?.id || session.account?.id;
+      const hasApiKey = freshAccount?.viabtc_api_key || session.account?.viabtc_api_key;
       
       if (accountId && hasApiKey) {
         try {
