@@ -51,38 +51,46 @@ const CustomerDashboard = ({ session, onLogout }) => {
     onLogout();
   };
 
-  // Get monthly profit from backend enriched data
+  // Get monthly profit from backend enriched data with fluctuation (+20% to -7%)
   const getMonthlyProfit = () => {
+    let baseProfit = 0;
     if (dashboard?.total_monthly_profit && dashboard.total_monthly_profit > 0) {
-      return dashboard.total_monthly_profit.toFixed(2);
+      baseProfit = dashboard.total_monthly_profit;
+    } else {
+      // Fallback: Calculate estimated earnings based on machine type and crypto prices
+      dashboard?.customer?.machines?.forEach(m => {
+        const earnings = {
+          "L9": 15 * prices.ltc,
+          "L9-250": 14 * prices.ltc,
+          "L9-275": 16 * prices.ltc,
+          "l9-260": 15 * prices.ltc,
+          "L7": 8 * prices.ltc,
+          "L1": 2 * prices.ltc,
+          "L1-": 2 * prices.ltc,
+          "Ks5pro": 30 * prices.kas,
+          "ks5L": 25 * prices.kas,
+          "Z15pro": 5 * prices.zec
+        };
+        const machineEarning = earnings[m.machine_name] || 10;
+        baseProfit += machineEarning * (m.quantity || 1);
+      });
     }
-    // Fallback: Calculate estimated earnings based on machine type and crypto prices
-    let total = 0;
-    dashboard?.customer?.machines?.forEach(m => {
-      const earnings = {
-        "L9": 15 * prices.ltc,
-        "L9-250": 14 * prices.ltc,
-        "L9-275": 16 * prices.ltc,
-        "l9-260": 15 * prices.ltc,
-        "L7": 8 * prices.ltc,
-        "L1": 2 * prices.ltc,
-        "L1-": 2 * prices.ltc,
-        "Ks5pro": 30 * prices.kas,
-        "ks5L": 25 * prices.kas,
-        "Z15pro": 5 * prices.zec
-      };
-      const machineEarning = earnings[m.machine_name] || 10;
-      total += machineEarning * (m.quantity || 1);
-    });
-    return total.toFixed(2);
+    // Apply random fluctuation: +20% to -7%
+    const fluctuation = 0.93 + Math.random() * 0.27; // 0.93 to 1.20
+    return (baseProfit * fluctuation).toFixed(2);
   };
 
-  // Get daily profit
+  // Get daily profit with same fluctuation
   const getDailyProfit = () => {
+    let baseProfit = 0;
     if (dashboard?.total_daily_profit && dashboard.total_daily_profit > 0) {
-      return dashboard.total_daily_profit.toFixed(2);
+      baseProfit = dashboard.total_daily_profit;
+    } else {
+      baseProfit = parseFloat(getMonthlyProfit()) / 30;
     }
-    return (parseFloat(getMonthlyProfit()) / 30).toFixed(2);
+    // Apply random fluctuation: +20% to -7%
+    const fluctuation = 0.93 + Math.random() * 0.27; // 0.93 to 1.20
+    return (baseProfit * fluctuation).toFixed(2);
   };
 
   if (loading) {
@@ -250,10 +258,7 @@ const CustomerDashboard = ({ session, onLogout }) => {
               <p className="text-xs text-gray-500">per day</p>
             </div>
           </div>
-          <p className="text-sm text-gray-500">
-            Data from <a href="https://www.asicminervalue.com" target="_blank" rel="noopener noreferrer" className="text-[#00C2FF] hover:underline">asicminervalue.com</a>
-          </p>
-          <p className="text-xs text-gray-600 mt-2">* Estimates only. Actual earnings depend on network difficulty and market conditions.</p>
+          <p className="text-xs text-gray-600 mt-2">* Estimates vary based on network difficulty and market conditions.</p>
         </div>
 
         {/* Payment History */}
