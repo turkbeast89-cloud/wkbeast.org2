@@ -1051,12 +1051,20 @@ async def test_viabtc_connection():
                     
                     # Provide helpful messages for common errors
                     if error_code == 12004:
+                        # Get actual server IP dynamically
+                        try:
+                            async with aiohttp.ClientSession() as ip_session:
+                                async with ip_session.get("https://api.ipify.org", timeout=5) as ip_resp:
+                                    actual_ip = await ip_resp.text()
+                        except:
+                            actual_ip = "unknown"
+                        
                         return {
                             "success": False,
                             "error": error_msg,
-                            "message": "IP not whitelisted. Add server IP: 35.184.53.215 to your ViaBTC API whitelist.",
+                            "message": f"IP not whitelisted. Add server IP: {actual_ip} to your ViaBTC API whitelist.",
                             "code": error_code,
-                            "server_ip": "35.184.53.215"
+                            "server_ip": actual_ip
                         }
                     
                     return {
