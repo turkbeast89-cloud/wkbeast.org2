@@ -40,6 +40,8 @@ const AdminPanel = () => {
     enabled: false
   });
   const [showSecretKey, setShowSecretKey] = useState(false);
+  const [testingApi, setTestingApi] = useState(false);
+  const [apiTestResult, setApiTestResult] = useState(null);
   const [loading, setLoading] = useState(true);
   
   // Modals
@@ -116,6 +118,39 @@ const AdminPanel = () => {
       toast.success("ViaBTC API settings saved");
     } catch (e) {
       toast.error("Failed to save ViaBTC settings");
+    }
+  };
+
+  // Test ViaBTC API connection
+  const handleTestViaBtcApi = async () => {
+    setTestingApi(true);
+    setApiTestResult(null);
+    try {
+      // First save the settings
+      await axios.put(`${API}/viabtc-settings`, null, {
+        params: {
+          access_key: viaBtcSettings.access_key,
+          secret_key: viaBtcSettings.secret_key,
+          enabled: viaBtcSettings.enabled
+        }
+      });
+      
+      // Then test the connection
+      const res = await axios.post(`${API}/viabtc-test`);
+      setApiTestResult(res.data);
+      if (res.data.success) {
+        toast.success("API connection successful!");
+      } else {
+        toast.error(res.data.message || "API test failed");
+      }
+    } catch (e) {
+      setApiTestResult({
+        success: false,
+        message: e.response?.data?.message || "Failed to test API connection"
+      });
+      toast.error("Failed to test API connection");
+    } finally {
+      setTestingApi(false);
     }
   };
 
@@ -319,8 +354,52 @@ const AdminPanel = () => {
             <Save size={16} className="mr-2" />
             Save API Settings
           </Button>
+          <Button 
+            onClick={handleTestViaBtcApi} 
+            variant="outline" 
+            className="border-[#27272A]"
+            disabled={testingApi || !viaBtcSettings.access_key || !viaBtcSettings.secret_key}
+            data-testid="test-viabtc-btn"
+          >
+            {testingApi ? (
+              <>
+                <RefreshCw size={16} className="mr-2 animate-spin" />
+                Testing...
+              </>
+            ) : (
+              <>
+                <Activity size={16} className="mr-2" />
+                Test Connection
+              </>
+            )}
+          </Button>
           <p className="text-xs text-gray-500">Get your API keys from <a href="https://www.viabtc.com/tools/api" target="_blank" rel="noopener noreferrer" className="text-[#00C2FF] hover:underline">ViaBTC API Settings</a></p>
         </div>
+
+        {/* API Test Result */}
+        {apiTestResult && (
+          <div className={`mt-4 p-4 rounded-lg border ${apiTestResult.success ? 'bg-[#00E054]/10 border-[#00E054]/30' : 'bg-red-500/10 border-red-500/30'}`}>
+            <div className="flex items-center gap-2 mb-2">
+              {apiTestResult.success ? (
+                <div className="w-3 h-3 rounded-full bg-[#00E054] animate-pulse"></div>
+              ) : (
+                <div className="w-3 h-3 rounded-full bg-red-500"></div>
+              )}
+              <span className={`font-medium ${apiTestResult.success ? 'text-[#00E054]' : 'text-red-400'}`}>
+                {apiTestResult.success ? 'Connection Successful' : 'Connection Failed'}
+              </span>
+            </div>
+            <p className="text-sm text-gray-400">{apiTestResult.message}</p>
+            {apiTestResult.error && (
+              <p className="text-xs text-red-400 mt-1">Error: {apiTestResult.error}</p>
+            )}
+            {apiTestResult.success && apiTestResult.data && (
+              <div className="mt-2 text-xs text-gray-500">
+                <p>Hashrate data received successfully</p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Customer Accounts */}

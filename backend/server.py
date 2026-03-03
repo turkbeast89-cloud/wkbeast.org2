@@ -988,6 +988,69 @@ async def update_viabtc_settings(access_key: str = "", secret_key: str = "", ena
     )
     return result
 
+@api_router.post("/viabtc-test")
+async def test_viabtc_connection():
+    """Test ViaBTC API connection"""
+    import aiohttp
+    import hashlib
+    import hmac
+    import time
+    
+    settings = await db.viabtc_settings.find_one({"id": "viabtc_settings"}, {"_id": 0})
+    if not settings or not settings.get("access_key") or not settings.get("secret_key"):
+        return {
+            "success": False,
+            "error": "API keys not configured",
+            "message": "Please enter your Access Key and Secret Key first"
+        }
+    
+    access_key = settings["access_key"]
+    secret_key = settings["secret_key"]
+    
+    try:
+        # ViaBTC API test - get account info
+        timestamp = str(int(time.time() * 1000))
+        
+        # Create signature
+        params = f"access_id={access_key}&tonce={timestamp}"
+        signature = hmac.new(
+            secret_key.encode('utf-8'),
+            params.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest().lower()
+        
+        url = f"https://www.viabtc.com/res/openapi/v1/hashrate?{params}&signature={signature}"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=10) as resp:
+                data = await resp.json()
+                
+                if resp.status == 200 and data.get("code") == 0:
+                    return {
+                        "success": True,
+                        "message": "Connection successful! API is working.",
+                        "data": data.get("data", {})
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error": data.get("message", "Unknown error"),
+                        "message": f"API returned error: {data.get('message', 'Unknown error')}",
+                        "code": data.get("code")
+                    }
+    except aiohttp.ClientError as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "message": "Network error - could not connect to ViaBTC"
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "message": f"Error testing connection: {str(e)}"
+        }
+
 # ==================== AUTO-CREATE CUSTOMER ACCOUNTS ====================
 
 @api_router.post("/auto-create-accounts")
