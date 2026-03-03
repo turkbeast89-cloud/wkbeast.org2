@@ -1136,7 +1136,7 @@ async def get_viabtc_subaccounts():
 
 @api_router.post("/viabtc/sync-accounts")
 async def sync_viabtc_accounts():
-    """Sync ViaBTC sub-accounts with customer accounts"""
+    """Sync ViaBTC sub-accounts with customer accounts - updates username, worker_name, and API keys"""
     # Get all sub-accounts from ViaBTC
     subaccounts_res = await get_viabtc_subaccounts()
     if not subaccounts_res.get("success"):
@@ -1161,10 +1161,15 @@ async def sync_viabtc_accounts():
         secret_key = sub.get("secret_key", "")
         
         if sub_name in account_map:
-            # Update the customer account with the API key and secret key
+            # Update the customer account - username = worker_name = sub_account name
             await db.customer_accounts.update_one(
                 {"id": account_map[sub_name]["id"]},
-                {"$set": {"viabtc_api_key": api_key, "viabtc_secret_key": secret_key}}
+                {"$set": {
+                    "username": sub_name,  # username = worker_name
+                    "worker_name": sub_name,
+                    "viabtc_api_key": api_key, 
+                    "viabtc_secret_key": secret_key
+                }}
             )
             updated.append(sub_name)
         else:

@@ -455,9 +455,8 @@ const AdminPanel = () => {
             <thead>
               <tr className="table-header">
                 <th className="text-left py-3 px-4">Customer</th>
-                <th className="text-left py-3 px-4">Username</th>
+                <th className="text-left py-3 px-4">Username / Worker Name</th>
                 <th className="text-left py-3 px-4">Password</th>
-                <th className="text-left py-3 px-4">Worker Name (ViaBTC)</th>
                 <th className="text-left py-3 px-4">API Key</th>
                 <th className="text-right py-3 px-4">Actions</th>
               </tr>
@@ -466,14 +465,13 @@ const AdminPanel = () => {
               {accounts.map(account => (
                 <tr key={account.id} className="table-row">
                   <td className="py-3 px-4 text-white">{getCustomerName(account.customer_id)}</td>
-                  <td className="py-3 px-4 text-gray-400">{account.username}</td>
+                  <td className="py-3 px-4 text-[#00C2FF] font-mono">{account.worker_name || account.username || <span className="text-red-400">Not set</span>}</td>
                   <td className="py-3 px-4 font-mono text-gray-400">{account.password}</td>
-                  <td className="py-3 px-4 text-[#00C2FF] font-mono">{account.worker_name || <span className="text-red-400">Not set</span>}</td>
                   <td className="py-3 px-4 font-mono text-xs">
                     {account.viabtc_api_key ? (
                       <span className="text-[#00E054]">{account.viabtc_api_key.substring(0, 8)}...</span>
                     ) : (
-                      <span className="text-red-400">Not set</span>
+                      <span className="text-red-400">Not synced</span>
                     )}
                   </td>
                   <td className="py-3 px-4 text-right">
@@ -571,12 +569,13 @@ const AdminPanel = () => {
               <Select value={accountForm.customer_id} onValueChange={(v) => {
                 const customer = customers.find(c => c.id === v);
                 const phone = customer?.phone?.replace(/\D/g, "") || "";
+                const workerName = customer?.name?.toLowerCase().replace(/\s/g, "") || "";
                 setAccountForm({
                   ...accountForm,
                   customer_id: v,
-                  username: customer?.name?.toLowerCase().replace(/\s/g, "") || "",
+                  username: workerName,
                   password: phone.slice(-4) || "0000",
-                  worker_name: customer?.name?.toLowerCase().replace(/\s/g, "") || ""
+                  worker_name: workerName
                 });
               }}>
                 <SelectTrigger className="bg-[#0A0A0A] border-[#27272A] mt-1">
@@ -590,26 +589,32 @@ const AdminPanel = () => {
               </Select>
             </div>
             <div>
-              <Label>Username</Label>
-              <Input value={accountForm.username} onChange={(e) => setAccountForm({ ...accountForm, username: e.target.value })} className="bg-[#0A0A0A] border-[#27272A] mt-1" />
+              <Label>Username / Worker Name (ViaBTC account name)</Label>
+              <Input 
+                value={accountForm.worker_name} 
+                onChange={(e) => {
+                  const value = e.target.value.toLowerCase().replace(/\s/g, "");
+                  setAccountForm({ ...accountForm, username: value, worker_name: value });
+                }} 
+                className="bg-[#0A0A0A] border-[#27272A] mt-1 font-mono" 
+                placeholder="e.g., hamidwk"
+              />
+              <p className="text-xs text-gray-500 mt-1">This is both the login username AND the ViaBTC sub-account name</p>
             </div>
             <div>
               <Label>Password (last 4 digits of phone)</Label>
               <Input value={accountForm.password} onChange={(e) => setAccountForm({ ...accountForm, password: e.target.value })} className="bg-[#0A0A0A] border-[#27272A] mt-1" />
             </div>
             <div>
-              <Label>Worker Name (ViaBTC)</Label>
-              <Input value={accountForm.worker_name} onChange={(e) => setAccountForm({ ...accountForm, worker_name: e.target.value })} className="bg-[#0A0A0A] border-[#27272A] mt-1" placeholder="Same as username" />
-            </div>
-            <div>
-              <Label>ViaBTC API Key (Customer's own key)</Label>
+              <Label>ViaBTC API Key (auto-synced)</Label>
               <Input 
                 value={accountForm.viabtc_api_key} 
                 onChange={(e) => setAccountForm({ ...accountForm, viabtc_api_key: e.target.value })} 
                 className="bg-[#0A0A0A] border-[#27272A] mt-1 font-mono text-xs" 
-                placeholder="e.g., caf2a5e9e3cbeaa5e67f5a71c420e8eb" 
+                placeholder="Click 'Sync ViaBTC API Keys' to auto-fill" 
+                readOnly
               />
-              <p className="text-xs text-gray-500 mt-1">Get from ViaBTC → Settings → API Management</p>
+              <p className="text-xs text-gray-500 mt-1">Auto-synced from ViaBTC. Click "Sync ViaBTC API Keys" button.</p>
             </div>
           </div>
           <DialogFooter>
