@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Users, CreditCard, MessageSquare, Settings, 
   ChevronRight, Plus, Edit2, Trash2, Download, Upload, Send,
   DollarSign, TrendingUp, Cpu, AlertCircle, Check, X, Menu,
-  ExternalLink, RefreshCw, FileSpreadsheet
+  ExternalLink, RefreshCw, FileSpreadsheet, Shield
 } from "lucide-react";
 
 // Import auth
@@ -19,6 +19,10 @@ import Customers from "./pages/Customers";
 import Payments from "./pages/Payments";
 import WhatsAppSender from "./pages/WhatsAppSender";
 import SettingsPage from "./pages/Settings";
+import AdminPanel from "./pages/AdminPanel";
+import CustomerLogin from "./pages/CustomerLogin";
+import CustomerDashboard from "./pages/CustomerDashboard";
+import CustomerPortal from "./pages/CustomerPortal";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 export const API = `${BACKEND_URL}/api`;
@@ -32,6 +36,7 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
     { path: "/customers", icon: Users, label: "Customers" },
     { path: "/payments", icon: CreditCard, label: "Payments" },
     { path: "/whatsapp", icon: MessageSquare, label: "WhatsApp" },
+    { path: "/admin", icon: Shield, label: "Admin Panel" },
     { path: "/settings", icon: Settings, label: "Settings" },
   ];
 
@@ -109,9 +114,12 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { isAuthenticated, isLoading, login } = useAuth();
 
+  // Check if on customer portal route
+  const isCustomerPortal = window.location.pathname === "/portal" || window.location.pathname.startsWith("/portal");
+
   // Initialize default data on first load
   useEffect(() => {
-    if (isAuthenticated) {
+    if (isAuthenticated && !isCustomerPortal) {
       const initData = async () => {
         try {
           await axios.post(`${API}/init`);
@@ -121,7 +129,12 @@ function App() {
       };
       initData();
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, isCustomerPortal]);
+
+  // Customer portal - separate flow
+  if (isCustomerPortal) {
+    return <CustomerPortal />;
+  }
 
   // Show loading while checking auth
   if (isLoading) {
@@ -161,6 +174,7 @@ function App() {
             <Route path="/customers" element={<Customers />} />
             <Route path="/payments" element={<Payments />} />
             <Route path="/whatsapp" element={<WhatsAppSender />} />
+            <Route path="/admin" element={<AdminPanel />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Routes>
         </main>

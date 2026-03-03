@@ -102,6 +102,68 @@ class SettingsUpdate(BaseModel):
     usdt_address: Optional[str] = None
     team_name: Optional[str] = None
 
+# ==================== CUSTOMER PORTAL MODELS ====================
+
+class CustomerAccount(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    customer_id: str  # Links to Customer
+    username: str  # Customer name (lowercase, no spaces)
+    password: str  # Last 4 digits of phone
+    worker_name: str = ""  # ViaBTC worker name
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+class CustomerAccountCreate(BaseModel):
+    customer_id: str
+    username: str
+    password: str
+    worker_name: str = ""
+
+class MaintenanceLog(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    customer_id: str
+    machine_info: str = ""
+    description: str
+    date: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+class MaintenanceLogCreate(BaseModel):
+    customer_id: str
+    machine_info: str = ""
+    description: str
+
+class FarmStats(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = "farm_stats"
+    machines_online: int = 2430
+    machines_offline: int = 10
+    total_hashrate: str = "850 TH/s"
+    fluctuation: int = 5  # Random +/- range
+
+class FarmStatsUpdate(BaseModel):
+    machines_online: Optional[int] = None
+    machines_offline: Optional[int] = None
+    total_hashrate: Optional[str] = None
+    fluctuation: Optional[int] = None
+
+class ViaBTCSettings(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = "viabtc_settings"
+    access_key: str = ""
+    secret_key: str = ""
+    enabled: bool = False
+
+class MachineStatus(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    customer_id: str
+    worker_name: str
+    status: str = "online"  # online, offline
+    hashrate: str = "0 TH/s"
+    temperature: str = "0°C"
+    uptime: str = "0h"
+    last_updated: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
 # ==================== MACHINE TYPES ====================
 
 @api_router.get("/machine-types", response_model=List[MachineType])
@@ -651,6 +713,290 @@ async def init_default_data():
 @api_router.get("/")
 async def root():
     return {"message": "WKBeast Crypto Farm Manager API"}
+
+# ==================== CUSTOMER PORTAL ====================
+
+@api_router.post("/portal/login")
+async def customer_login(username: str, password: str):
+    """Customer login"""
+    account = await db.customer_accounts.find_one({
+        "username": username.lower().strip(),
+        "password": password
+    }, {"_id": 0})
+    
+    if not account:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    
+    customer = await db.customers.find_one({"id": account["customer_id"]}, {"_id": 0})
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    
+    return {
+        "success": True,
+        "account": account,
+        "customer": customer
+    }
+
+@api_router.get("/portal/dashboard/{customer_id}")
+async def get_customer_dashboard(customer_id: str):
+    """Get customer dashboard data"""
+    customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    
+    # Get machine statuses
+    machine_statuses = await db.machine_statuses.find({"customer_id": customer_id}, {"_id": 0}).to_list(100)
+    
+    # Get payments
+    payments = await db.payments.find({"customer_id": customer_id}, {"_id": 0}).to_list(100)
+    
+    # Get maintenance logs
+    logs = await db.maintenance_logs.find({"customer_id": customer_id}, {"_id": 0}).to_list(100)
+    
+    # Get farm stats with fluctuation
+    import random
+    farm_stats = await db.farm_stats.find_one({"id": "farm_stats"}, {"_id": 0})
+    if not farm_stats:
+        farm_stats = {"machines_online": 2430, "machines_offline": 10, "total_hashrate": "850 TH/s", "fluctuation": 5}
+    
+    fluct = farm_stats.get("fluctuation", 5)
+    farm_stats["machines_online_display"] = farm_stats["machines_online"] + random.randint(-fluct, fluct)
+    farm_stats["machines_offline_display"] = max(0, farm_stats["machines_offline"] + random.randint(-2, 2))
+    
+    return {
+        "customer": customer,
+        "machine_statuses": machine_statuses,
+        "payments": payments,
+        "maintenance_logs": logs,
+        "farm_stats": farm_stats
+    }
+
+@api_router.get("/portal/crypto-prices")
+async def get_crypto_prices():
+    """Get live crypto prices for earnings calculation"""
+    import aiohttp
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                "https://api.coingecko.com/api/v3/simple/price?ids=litecoin,kaspa,zcash&vs_currencies=usd",
+                timeout=10
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return {
+                        "ltc": data.get("litecoin", {}).get("usd", 0),
+                        "kas": data.get("kaspa", {}).get("usd", 0),
+                        "zec": data.get("zcash", {}).get("usd", 0)
+                    }
+    except Exception as e:
+        pass
+    
+    # Fallback prices
+    return {"ltc": 85, "kas": 0.12, "zec": 35}
+
+# ==================== CUSTOMER ACCOUNTS (Admin) ====================
+
+@api_router.get("/customer-accounts")
+async def get_customer_accounts():
+    accounts = await db.customer_accounts.find({}, {"_id": 0}).to_list(1000)
+    return accounts
+
+@api_router.post("/customer-accounts")
+async def create_customer_account(data: CustomerAccountCreate):
+    # Check if account already exists
+    existing = await db.customer_accounts.find_one({"customer_id": data.customer_id})
+    if existing:
+        raise HTTPException(status_code=400, detail="Account already exists for this customer")
+    
+    account = CustomerAccount(
+        customer_id=data.customer_id,
+        username=data.username.lower().strip().replace(" ", ""),
+        password=data.password,
+        worker_name=data.worker_name
+    )
+    await db.customer_accounts.insert_one(account.model_dump())
+    return account
+
+@api_router.put("/customer-accounts/{account_id}")
+async def update_customer_account(account_id: str, data: dict):
+    if "username" in data:
+        data["username"] = data["username"].lower().strip().replace(" ", "")
+    
+    result = await db.customer_accounts.find_one_and_update(
+        {"id": account_id},
+        {"$set": data},
+        return_document=True,
+        projection={"_id": 0}
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Account not found")
+    return result
+
+@api_router.delete("/customer-accounts/{account_id}")
+async def delete_customer_account(account_id: str):
+    result = await db.customer_accounts.delete_one({"id": account_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Account not found")
+    return {"message": "Deleted"}
+
+# ==================== MAINTENANCE LOGS ====================
+
+@api_router.get("/maintenance-logs")
+async def get_maintenance_logs(customer_id: Optional[str] = None):
+    query = {}
+    if customer_id:
+        query["customer_id"] = customer_id
+    logs = await db.maintenance_logs.find(query, {"_id": 0}).to_list(1000)
+    return logs
+
+@api_router.post("/maintenance-logs")
+async def create_maintenance_log(data: MaintenanceLogCreate):
+    log = MaintenanceLog(
+        customer_id=data.customer_id,
+        machine_info=data.machine_info,
+        description=data.description
+    )
+    await db.maintenance_logs.insert_one(log.model_dump())
+    return log
+
+@api_router.delete("/maintenance-logs/{log_id}")
+async def delete_maintenance_log(log_id: str):
+    result = await db.maintenance_logs.delete_one({"id": log_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Log not found")
+    return {"message": "Deleted"}
+
+# ==================== FARM STATS (Admin) ====================
+
+@api_router.get("/farm-stats")
+async def get_farm_stats():
+    stats = await db.farm_stats.find_one({"id": "farm_stats"}, {"_id": 0})
+    if not stats:
+        new_stats = FarmStats()
+        doc = new_stats.model_dump()
+        await db.farm_stats.insert_one(doc)
+        stats = await db.farm_stats.find_one({"id": "farm_stats"}, {"_id": 0})
+    return stats
+
+@api_router.put("/farm-stats")
+async def update_farm_stats(data: FarmStatsUpdate):
+    update_data = {k: v for k, v in data.model_dump().items() if v is not None}
+    
+    result = await db.farm_stats.find_one_and_update(
+        {"id": "farm_stats"},
+        {"$set": update_data},
+        upsert=True,
+        return_document=True,
+        projection={"_id": 0}
+    )
+    return result
+
+# ==================== MACHINE STATUS (Admin) ====================
+
+@api_router.get("/machine-statuses")
+async def get_machine_statuses(customer_id: Optional[str] = None):
+    query = {}
+    if customer_id:
+        query["customer_id"] = customer_id
+    statuses = await db.machine_statuses.find(query, {"_id": 0}).to_list(1000)
+    return statuses
+
+@api_router.post("/machine-statuses")
+async def create_or_update_machine_status(customer_id: str, worker_name: str, status: str = "online", hashrate: str = "0 TH/s", temperature: str = "0°C", uptime: str = "0h"):
+    existing = await db.machine_statuses.find_one({"customer_id": customer_id, "worker_name": worker_name})
+    
+    if existing:
+        result = await db.machine_statuses.find_one_and_update(
+            {"customer_id": customer_id, "worker_name": worker_name},
+            {"$set": {
+                "status": status,
+                "hashrate": hashrate,
+                "temperature": temperature,
+                "uptime": uptime,
+                "last_updated": datetime.now(timezone.utc).isoformat()
+            }},
+            return_document=True,
+            projection={"_id": 0}
+        )
+        return result
+    else:
+        machine_status = MachineStatus(
+            customer_id=customer_id,
+            worker_name=worker_name,
+            status=status,
+            hashrate=hashrate,
+            temperature=temperature,
+            uptime=uptime
+        )
+        await db.machine_statuses.insert_one(machine_status.model_dump())
+        return machine_status
+
+@api_router.delete("/machine-statuses/{status_id}")
+async def delete_machine_status(status_id: str):
+    result = await db.machine_statuses.delete_one({"id": status_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Status not found")
+    return {"message": "Deleted"}
+
+# ==================== VIABTC SETTINGS ====================
+
+@api_router.get("/viabtc-settings")
+async def get_viabtc_settings():
+    settings = await db.viabtc_settings.find_one({"id": "viabtc_settings"}, {"_id": 0})
+    if not settings:
+        settings = ViaBTCSettings().model_dump()
+    # Don't return secret key in full
+    if settings.get("secret_key"):
+        settings["secret_key_masked"] = "****" + settings["secret_key"][-4:] if len(settings["secret_key"]) > 4 else "****"
+    return settings
+
+@api_router.put("/viabtc-settings")
+async def update_viabtc_settings(access_key: str = "", secret_key: str = "", enabled: bool = False):
+    result = await db.viabtc_settings.find_one_and_update(
+        {"id": "viabtc_settings"},
+        {"$set": {
+            "access_key": access_key,
+            "secret_key": secret_key,
+            "enabled": enabled
+        }},
+        upsert=True,
+        return_document=True,
+        projection={"_id": 0}
+    )
+    return result
+
+# ==================== AUTO-CREATE CUSTOMER ACCOUNTS ====================
+
+@api_router.post("/auto-create-accounts")
+async def auto_create_customer_accounts():
+    """Auto-create accounts for all customers without accounts"""
+    customers = await db.customers.find({}, {"_id": 0}).to_list(1000)
+    existing_accounts = await db.customer_accounts.find({}, {"_id": 0}).to_list(1000)
+    existing_customer_ids = {a["customer_id"] for a in existing_accounts}
+    
+    created = 0
+    for customer in customers:
+        if customer["id"] not in existing_customer_ids:
+            # Generate username from name
+            username = customer["name"].lower().strip().replace(" ", "")
+            
+            # Generate password from last 4 digits of phone
+            phone = customer.get("phone", "").replace(" ", "").replace("-", "").replace("+", "")
+            password = phone[-4:] if len(phone) >= 4 else "0000"
+            
+            # Worker name same as username
+            worker_name = username
+            
+            account = CustomerAccount(
+                customer_id=customer["id"],
+                username=username,
+                password=password,
+                worker_name=worker_name
+            )
+            await db.customer_accounts.insert_one(account.model_dump())
+            created += 1
+    
+    return {"message": f"Created {created} accounts"}
 
 # Include the router
 app.include_router(api_router)
