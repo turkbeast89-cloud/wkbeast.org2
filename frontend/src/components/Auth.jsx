@@ -58,54 +58,56 @@ export const LoginScreen = ({ onLogin }) => {
           <div className="w-20 h-20 rounded-2xl bg-[#00E054] flex items-center justify-center mx-auto mb-4 shadow-[0_0_40px_rgba(0,224,84,0.4)]">
             <span className="text-black font-bold text-3xl">W</span>
           </div>
-          <h1 className="text-2xl font-bold text-white">WKBeast Farm Manager</h1>
-          <p className="text-gray-500 mt-2">Enter password to continue</p>
+          <h1 className="text-2xl font-bold text-white">WKBeast Farm</h1>
+          <p className="text-gray-500 mt-2">Customer Portal</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="relative">
-            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" size={20} />
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => {
-                setPassword(e.target.value);
-                setError(false);
-              }}
-              placeholder="Enter password"
-              className={`w-full pl-12 pr-4 py-4 bg-[#0F0F0F] border ${
-                error ? 'border-red-500' : 'border-[#27272A]'
-              } rounded-xl text-white text-center text-2xl tracking-[0.5em] placeholder:tracking-normal placeholder:text-base focus:outline-none focus:border-[#00E054] transition-colors`}
-              autoFocus
-              data-testid="password-input"
-            />
-          </div>
-          
-          {error && (
-            <p className="text-red-500 text-sm text-center">Wrong password. Try again.</p>
-          )}
-
-          <button
-            type="submit"
-            className="w-full py-4 bg-[#00E054] text-black font-bold rounded-xl hover:bg-[#00E054]/90 transition-all hover:shadow-[0_0_30px_rgba(0,224,84,0.5)] active:scale-95"
-            data-testid="login-btn"
-          >
-            Unlock
-          </button>
-        </form>
-
-        <p className="text-center text-gray-600 text-xs mt-8">
-          Your device will be remembered
+        {/* Customer Login - Primary/Prominent */}
+        <a 
+          href="/portal"
+          className="block w-full py-4 text-center bg-[#00E054] text-black font-bold rounded-xl hover:bg-[#00E054]/90 transition-all hover:shadow-[0_0_30px_rgba(0,224,84,0.5)] mb-4"
+          data-testid="customer-portal-btn"
+        >
+          Customer Login
+        </a>
+        
+        <p className="text-center text-gray-500 text-sm mb-6">
+          View your machines, payments & earnings
         </p>
 
-        <div className="mt-6 pt-6 border-t border-[#27272A]">
-          <p className="text-center text-gray-500 text-sm mb-2">Are you a customer?</p>
-          <a 
-            href="/portal"
-            className="block w-full py-3 text-center bg-[#1A1A1A] border border-[#27272A] text-white rounded-xl hover:bg-[#27272A] transition-colors"
-          >
-            Customer Portal Login
-          </a>
+        {/* Admin Login - Secondary/Smaller */}
+        <div className="mt-8 pt-6 border-t border-[#27272A]">
+          <p className="text-center text-gray-600 text-xs mb-3">Admin Access</p>
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <div className="relative">
+              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={16} />
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  setError(false);
+                }}
+                placeholder="Admin password"
+                className={`w-full pl-10 pr-4 py-3 bg-[#0F0F0F] border ${
+                  error ? 'border-red-500' : 'border-[#27272A]'
+                } rounded-lg text-white text-sm tracking-[0.3em] placeholder:tracking-normal placeholder:text-xs focus:outline-none focus:border-[#27272A] transition-colors`}
+                data-testid="password-input"
+              />
+            </div>
+            
+            {error && (
+              <p className="text-red-500 text-xs text-center">Wrong password</p>
+            )}
+
+            <button
+              type="submit"
+              className="w-full py-2.5 bg-[#1A1A1A] border border-[#27272A] text-gray-400 text-sm rounded-lg hover:bg-[#27272A] hover:text-white transition-colors"
+              data-testid="login-btn"
+            >
+              Unlock Admin
+            </button>
+          </form>
         </div>
       </div>
 
