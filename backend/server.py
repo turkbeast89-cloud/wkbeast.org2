@@ -1206,8 +1206,13 @@ async def sync_viabtc_accounts():
     # Get all customer accounts
     customer_accounts = await db.customer_accounts.find({}, {"_id": 0}).to_list(1000)
     
-    # Create a map of worker_name -> customer_account
-    account_map = {acc.get("worker_name", "").lower(): acc for acc in customer_accounts}
+    # Create a map of worker_name -> LIST of customer accounts (multiple accounts can share same worker)
+    from collections import defaultdict
+    account_map = defaultdict(list)
+    for acc in customer_accounts:
+        worker = acc.get("worker_name", "").lower()
+        if worker:
+            account_map[worker].append(acc)
     
     updated = []
     not_found = []
@@ -1215,16 +1220,18 @@ async def sync_viabtc_accounts():
     # First, check for main account (turkbeast) - give it the main API key
     main_account_name = "turkbeast"
     if main_account_name in account_map and main_access_key:
-        await db.customer_accounts.update_one(
-            {"id": account_map[main_account_name]["id"]},
-            {"$set": {
-                "username": main_account_name,
-                "worker_name": main_account_name,
-                "viabtc_api_key": main_access_key,
-                "viabtc_secret_key": main_secret_key
-            }}
-        )
-        updated.append(f"{main_account_name} (main)")
+        # Update ALL accounts with this worker_name
+        for acc in account_map[main_account_name]:
+            await db.customer_accounts.update_one(
+                {"id": acc["id"]},
+                {"$set": {
+                    "username": main_account_name,
+                    "worker_name": main_account_name,
+                    "viabtc_api_key": main_access_key,
+                    "viabtc_secret_key": main_secret_key
+                }}
+            )
+        updated.append(f"{main_account_name} (main) x{len(account_map[main_account_name])}")
     
     for sub in subaccounts:
         sub_name = sub.get("account", "").lower()
@@ -1236,17 +1243,19 @@ async def sync_viabtc_accounts():
             continue
         
         if sub_name in account_map:
-            # Update the customer account - username = worker_name = sub_account name
-            await db.customer_accounts.update_one(
-                {"id": account_map[sub_name]["id"]},
-                {"$set": {
-                    "username": sub_name,  # username = worker_name
-                    "worker_name": sub_name,
-                    "viabtc_api_key": api_key, 
-                    "viabtc_secret_key": secret_key
-                }}
-            )
-            updated.append(sub_name)
+            # Update ALL customer accounts with this worker_name
+            for acc in account_map[sub_name]:
+                await db.customer_accounts.update_one(
+                    {"id": acc["id"]},
+                    {"$set": {
+                        "username": sub_name,
+                        "worker_name": sub_name,
+                        "viabtc_api_key": api_key, 
+                        "viabtc_secret_key": secret_key
+                    }}
+                )
+            count = len(account_map[sub_name])
+            updated.append(f"{sub_name}" + (f" x{count}" if count > 1 else ""))
         else:
             not_found.append(sub_name)
     
