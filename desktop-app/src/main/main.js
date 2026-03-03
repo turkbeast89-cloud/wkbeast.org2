@@ -1,9 +1,10 @@
 const { app, BrowserWindow, Menu } = require('electron');
 const path = require('path');
-const { startServer } = require('./server');
 
 let mainWindow;
-let serverInstance;
+
+// Use the cloud backend URL
+const BACKEND_URL = 'https://farm-profit-tracker-1.preview.emergentagent.com';
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -20,8 +21,8 @@ function createWindow() {
     show: false
   });
 
-  // Wait for server to start, then load the app
-  mainWindow.loadURL('http://localhost:3847');
+  // Load the cloud web app directly
+  mainWindow.loadURL(BACKEND_URL);
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
@@ -79,9 +80,7 @@ function createWindow() {
   Menu.setApplicationMenu(menu);
 }
 
-app.whenReady().then(async () => {
-  // Start the backend server
-  serverInstance = await startServer();
+app.whenReady().then(() => {
   createWindow();
 });
 
@@ -94,11 +93,5 @@ app.on('window-all-closed', () => {
 app.on('activate', () => {
   if (mainWindow === null) {
     createWindow();
-  }
-});
-
-app.on('before-quit', () => {
-  if (serverInstance) {
-    serverInstance.close();
   }
 });
