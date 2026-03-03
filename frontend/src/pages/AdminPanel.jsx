@@ -390,7 +390,13 @@ const AdminPanel = () => {
               </span>
             </div>
             <p className="text-sm text-gray-400">{apiTestResult.message}</p>
-            {apiTestResult.error && (
+            {apiTestResult.server_ip && (
+              <div className="mt-2 p-2 bg-[#1A1A1A] rounded border border-[#27272A]">
+                <p className="text-xs text-gray-400">Add this IP to your ViaBTC whitelist:</p>
+                <p className="text-lg font-mono text-[#00C2FF] mt-1">{apiTestResult.server_ip}</p>
+              </div>
+            )}
+            {apiTestResult.error && !apiTestResult.server_ip && (
               <p className="text-xs text-red-400 mt-1">Error: {apiTestResult.error}</p>
             )}
             {apiTestResult.success && apiTestResult.data && (

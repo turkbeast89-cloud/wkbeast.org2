@@ -995,6 +995,7 @@ async def test_viabtc_connection():
     import hashlib
     import hmac
     import time
+    from urllib.parse import urlencode
     
     settings = await db.viabtc_settings.find_one({"id": "viabtc_settings"}, {"_id": 0})
     if not settings or not settings.get("access_key") or not settings.get("secret_key"):
@@ -1008,21 +1009,30 @@ async def test_viabtc_connection():
     secret_key = settings["secret_key"]
     
     try:
-        # ViaBTC API test - get account info
-        timestamp = str(int(time.time() * 1000))
+        # ViaBTC API - get hashrate (public endpoint with API key)
+        tonce = str(int(time.time() * 1000))
         
-        # Create signature
-        params = f"access_id={access_key}&tonce={timestamp}"
+        # Create params and query string
+        params = {"coin": "LTC", "tonce": tonce}
+        query_string = urlencode(params)
+        
+        # Generate signature using HMAC-SHA256
         signature = hmac.new(
             secret_key.encode('utf-8'),
-            params.encode('utf-8'),
+            query_string.encode('utf-8'),
             hashlib.sha256
-        ).hexdigest().lower()
+        ).hexdigest()
         
-        url = f"https://www.viabtc.com/res/openapi/v1/hashrate?{params}&signature={signature}"
+        # Headers as per ViaBTC API docs
+        headers = {
+            "X-API-KEY": access_key,
+            "X-SIGNATURE": signature
+        }
+        
+        url = f"https://pool.viabtc.com/res/openapi/v1/hashrate?{query_string}"
         
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=10) as resp:
+            async with session.get(url, headers=headers, timeout=15) as resp:
                 data = await resp.json()
                 
                 if resp.status == 200 and data.get("code") == 0:
@@ -1032,11 +1042,24 @@ async def test_viabtc_connection():
                         "data": data.get("data", {})
                     }
                 else:
+                    error_msg = data.get("message", "Unknown error")
+                    error_code = data.get("code")
+                    
+                    # Provide helpful messages for common errors
+                    if error_code == 12004:
+                        return {
+                            "success": False,
+                            "error": error_msg,
+                            "message": "IP not whitelisted. Add server IP: 35.184.53.215 to your ViaBTC API whitelist.",
+                            "code": error_code,
+                            "server_ip": "35.184.53.215"
+                        }
+                    
                     return {
                         "success": False,
-                        "error": data.get("message", "Unknown error"),
-                        "message": f"API returned error: {data.get('message', 'Unknown error')}",
-                        "code": data.get("code")
+                        "error": error_msg,
+                        "message": f"API returned error: {error_msg}",
+                        "code": error_code
                     }
     except aiohttp.ClientError as e:
         return {
