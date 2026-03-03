@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Users, CreditCard, MessageSquare, Settings, 
   ChevronRight, Plus, Edit2, Trash2, Download, Upload, Send,
   DollarSign, TrendingUp, Cpu, AlertCircle, Check, X, Menu,
-  ExternalLink, RefreshCw, FileSpreadsheet, Shield
+  ExternalLink, RefreshCw, FileSpreadsheet, Shield, LogOut
 } from "lucide-react";
 
 // Import auth
@@ -28,7 +28,7 @@ const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 export const API = `${BACKEND_URL}/api`;
 
 // Sidebar Component
-const Sidebar = ({ isOpen, setIsOpen }) => {
+const Sidebar = ({ isOpen, setIsOpen, onLogout }) => {
   const location = useLocation();
   
   const links = [
@@ -39,6 +39,12 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
     { path: "/admin", icon: Shield, label: "Admin Panel" },
     { path: "/settings", icon: Settings, label: "Settings" },
   ];
+
+  const handleLogout = () => {
+    if (window.confirm("Are you sure you want to logout?")) {
+      onLogout();
+    }
+  };
 
   return (
     <>
@@ -80,11 +86,15 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
           ))}
         </nav>
         
-        <div className="absolute bottom-6 left-6 right-6">
-          <div className="p-4 rounded-lg bg-[#1A1A1A] border border-[#27272A]">
-            <p className="text-xs text-gray-500 mb-1">Need help?</p>
-            <p className="text-sm text-white">Contact Support</p>
-          </div>
+        <div className="absolute bottom-6 left-6 right-6 space-y-3">
+          <button
+            onClick={handleLogout}
+            className="w-full p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 transition-colors flex items-center justify-center gap-2"
+            data-testid="logout-btn"
+          >
+            <LogOut size={16} />
+            <span className="text-sm font-medium">Logout</span>
+          </button>
         </div>
       </aside>
     </>
@@ -112,7 +122,7 @@ const MobileHeader = ({ setIsOpen }) => (
 
 function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const { isAuthenticated, isLoading, login } = useAuth();
+  const { isAuthenticated, isLoading, login, logout } = useAuth();
 
   // Check if on customer portal route
   const isCustomerPortal = window.location.pathname === "/portal" || window.location.pathname.startsWith("/portal");
@@ -165,7 +175,7 @@ function App() {
             }
           }}
         />
-        <Sidebar isOpen={sidebarOpen} setIsOpen={setSidebarOpen} />
+        <Sidebar isOpen={sidebarOpen} setIsOpen={setSidebarOpen} onLogout={logout} />
         <MobileHeader setIsOpen={setSidebarOpen} />
         
         <main className="main-content pt-20 md:pt-0">
