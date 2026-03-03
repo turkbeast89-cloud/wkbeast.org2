@@ -46,7 +46,7 @@ Build a crypto farming customer management app to:
 - `/api/portal/login` - Customer authentication (username + last 4 digits of phone as password)
 - `/api/portal/dashboard/{customer_id}` - Customer dashboard data (machines, payments, logs, farm stats)
 - `/api/portal/crypto-prices` - Live crypto prices from CoinGecko (with fallback)
-- `/api/farm-stats` - GET/PUT for configurable display statistics
+- `/api/farm-stats` - GET/PUT for configurable display statistics (supports per-coin hashrates)
 - `/api/customer-accounts` - CRUD for customer portal accounts
 - `/api/auto-create-accounts` - Bulk account generation
 - `/api/maintenance-logs` - CRUD for maintenance records
@@ -56,14 +56,14 @@ Build a crypto farming customer management app to:
 - **CustomerPortal.jsx** - Portal container with session management
 - **CustomerLogin.jsx** - Customer login page with branded UI
 - **CustomerDashboard.jsx** - Customer view showing:
-  - Farm Status (online/offline machines with fluctuation, hashrate)
-  - Your Machines list with status indicators
+  - Farm Status (online/offline machines with fluctuation, **per-coin hashrates**)
+  - Your Machines list with status indicators (coin badges, per-coin units)
   - Estimated Monthly Earnings (based on live crypto prices)
   - Payment History with status icons
   - Maintenance Log
   - Monthly hosting fee summary
 - **AdminPanel.jsx** - Admin management page with:
-  - Farm Stats configuration (display numbers for customers)
+  - Farm Stats configuration (display numbers for customers, **per-coin hashrate field**)
   - Customer Accounts table with CRUD
   - Auto-Create All accounts button
   - Machine Status update modal
@@ -71,9 +71,18 @@ Build a crypto farming customer management app to:
 
 #### Database Collections Added
 - `customer_accounts` - Portal login credentials
-- `farm_stats` - Configurable display statistics
+- `farm_stats` - Configurable display statistics (includes `total_hashrate_by_coin` field)
 - `maintenance_logs` - Machine maintenance records
 - `machine_statuses` - Individual machine status tracking
+
+### March 3, 2026 - Per-Coin Hashrate Display Fix (COMPLETED)
+- **Issue Fixed:** Farm Status was showing a single combined hashrate (incorrectly mixing GH/s + TH/s)
+- **Solution:** Added `total_hashrate_by_coin` field to farm_stats (format: "LTC:500 GH/s, KAS:350 TH/s")
+- **Backend:** Updated `FarmStats` and `FarmStatsUpdate` models to support per-coin hashrates
+- **Frontend:** 
+  - `CustomerDashboard.jsx`: Now displays separate hashrates per coin in Farm Status
+  - `AdminPanel.jsx`: Added "Hashrate by Coin" input field for admin configuration
+- **Customer hashrate display:** Fixed undefined `calculateCustomerHashrate()` function
 
 ## Prioritized Backlog
 
@@ -84,6 +93,7 @@ Build a crypto farming customer management app to:
 - [x] Profit dashboard
 - [x] Customer Portal with login
 - [x] Admin Panel for portal management
+- [x] Per-coin hashrate display in Farm Status (LTC/KAS separated)
 
 ### P1 (Important) - DONE ✅
 - [x] Excel import/export
@@ -91,10 +101,11 @@ Build a crypto farming customer management app to:
 - [x] Machine type management
 - [x] Farm stats configuration (display numbers)
 - [x] Live crypto prices for earnings estimate
+- [x] ViaBTC API integration (auto-fetch worker status/hashrate)
 
 ### P2 (Upcoming)
-- [ ] ViaBTC API integration (auto-fetch worker status/hashrate)
-- [ ] Maintenance Log notifications in portal
+- [ ] Live Earnings Calculator - Replace manual profit with CoinGecko API feed
+- [ ] Maintenance Log Feature - Admin adds notes, customers view them in portal
 - [ ] Auto-payment confirmation flow (customer marks paid → admin approves)
 - [ ] In-app notifications for offline machines
 
@@ -106,10 +117,12 @@ Build a crypto farming customer management app to:
 - [ ] Mobile app (PWA)
 - [ ] Monthly performance reports
 - [ ] Custom domain setup
+- [ ] Backend refactoring - Split server.py into modular routers
+- [ ] Remove legacy desktop-app directory
 
 ## Next Tasks
-1. **ViaBTC Integration** - Build settings page for API keys, fetch live worker data
-2. **Maintenance Notifications** - Alert customers in portal when logs are added
+1. **Live Earnings Calculator** - Replace manual profit entry with real-time CoinGecko prices
+2. **Maintenance Log Feature** - Full CRUD for maintenance notes with customer visibility
 3. **Refactoring** - Split server.py into modular routers
 
 ## Test Credentials
@@ -121,4 +134,4 @@ Build a crypto farming customer management app to:
 - **Frontend**: React + Tailwind CSS + Shadcn/UI
 - **Backend**: FastAPI (Python)
 - **Database**: MongoDB Atlas (Cloud)
-- **URL**: https://crypto-ops-1.preview.emergentagent.com
+- **URL**: https://crypto-mine-manager.preview.emergentagent.com

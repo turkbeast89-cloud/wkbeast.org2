@@ -238,39 +238,78 @@ const CustomerDashboard = ({ session, onLogout }) => {
   const customerMachinesOnline = validWorkers.filter(w => w.worker_status === "active").length;
   const customerMachinesTotal = validWorkers.length;
 
-  // Calculate customer's total hashrate from their workers
-  const calculateCustomerHashrate = () => {
+  // Calculate customer's total hashrate from their workers - SEPARATED BY COIN
+  const calculateHashrateByCoin = () => {
     if (!validWorkers || validWorkers.length === 0) {
-      return null;
+      return [];
     }
     
-    let totalHashrate = 0;
+    // Group hashrates by coin
+    const hashrateByCoin = {};
     validWorkers.forEach(worker => {
+      const coin = worker.coin || "LTC";
       const hashrate = parseInt(worker.hashrate_1hour || 0);
-      totalHashrate += hashrate;
+      if (!hashrateByCoin[coin]) {
+        hashrateByCoin[coin] = 0;
+      }
+      hashrateByCoin[coin] += hashrate;
     });
     
-    // Convert to appropriate unit (TH/s, GH/s, etc.)
-    if (totalHashrate >= 1000000000000) {
-      return `${(totalHashrate / 1000000000000).toFixed(2)} TH/s`;
-    } else if (totalHashrate >= 1000000000) {
-      return `${(totalHashrate / 1000000000).toFixed(2)} GH/s`;
-    } else if (totalHashrate >= 1000000) {
-      return `${(totalHashrate / 1000000).toFixed(2)} MH/s`;
-    } else {
-      return `${totalHashrate} H/s`;
-    }
+    // Convert to display format
+    const results = [];
+    Object.entries(hashrateByCoin).forEach(([coin, totalHashrate]) => {
+      let display;
+      if (coin === "KAS") {
+        // Kaspa uses TH/s
+        display = `${(totalHashrate / 1000000000000).toFixed(2)} TH/s`;
+      } else if (totalHashrate >= 1000000000000) {
+        display = `${(totalHashrate / 1000000000000).toFixed(2)} TH/s`;
+      } else if (totalHashrate >= 1000000000) {
+        display = `${(totalHashrate / 1000000000).toFixed(2)} GH/s`;
+      } else if (totalHashrate >= 1000000) {
+        display = `${(totalHashrate / 1000000).toFixed(2)} MH/s`;
+      } else {
+        display = `${totalHashrate} H/s`;
+      }
+      results.push({ coin, hashrate: display });
+    });
+    
+    return results;
   };
 
   // Calculate farm hashrate with fluctuation (based on online machine fluctuation)
-  const getFarmHashrate = () => {
+  // Returns an array of per-coin hashrates for the Farm Status display (cosmetic stats)
+  const getFarmHashrateByCoin = () => {
+    // Parse farm_stats.total_hashrate_by_coin if available (e.g., "LTC:500 GH/s,KAS:350 TH/s")
+    // Otherwise use legacy single hashrate for backwards compatibility
+    const fluctuation = farm_stats?.fluctuation || 5;
+    
+    if (farm_stats?.total_hashrate_by_coin) {
+      // New format: "LTC:500 GH/s,KAS:350 TH/s"
+      const parts = farm_stats.total_hashrate_by_coin.split(',').map(s => s.trim()).filter(Boolean);
+      return parts.map(part => {
+        const [coin, hashrateStr] = part.split(':').map(s => s.trim());
+        const baseHashrate = parseFloat(hashrateStr?.replace(/[^0-9.]/g, '') || 0);
+        const unit = hashrateStr?.replace(/[0-9.\s]/g, '') || 'TH/s';
+        const hashFluctuation = (fluctuation * 0.2 / 100) * baseHashrate;
+        const fluctuatedHashrate = baseHashrate + (Math.random() * 2 - 1) * hashFluctuation;
+        return { coin, hashrate: `${fluctuatedHashrate.toFixed(1)} ${unit}` };
+      });
+    }
+    
+    // Fallback to legacy single hashrate
     const baseHashrate = parseFloat(farm_stats?.total_hashrate?.replace(/[^0-9.]/g, '') || 850);
     const unit = farm_stats?.total_hashrate?.replace(/[0-9.\s]/g, '') || 'TH/s';
-    const fluctuation = farm_stats?.fluctuation || 5;
-    // Fluctuate hashrate proportionally to machine fluctuation (roughly 0.2% per machine)
     const hashFluctuation = (fluctuation * 0.2 / 100) * baseHashrate;
     const fluctuatedHashrate = baseHashrate + (Math.random() * 2 - 1) * hashFluctuation;
-    return `${fluctuatedHashrate.toFixed(1)} ${unit}`;
+    return [{ coin: 'Total', hashrate: `${fluctuatedHashrate.toFixed(1)} ${unit}` }];
+  };
+  
+  // Get customer's total hashrate display string (for the header)
+  const getCustomerHashrateDisplay = () => {
+    const hashrates = calculateHashrateByCoin();
+    if (hashrates.length === 0) return null;
+    return hashrates.map(h => `${h.coin}: ${h.hashrate}`).join(' | ');
   };
 
   return (
@@ -425,9 +464,16 @@ const CustomerDashboard = ({ session, onLogout }) => {
                 <Zap className="text-[#00C2FF]" size={14} />
                 <span className="text-gray-400 text-sm">Hashrate</span>
               </div>
-              <p className="text-4xl md:text-5xl font-bold text-[#00C2FF]">
-                {getFarmHashrate()}
-              </p>
+              <div className="space-y-1">
+                {getFarmHashrateByCoin().map((item, idx) => (
+                  <div key={idx} className="flex items-center justify-center gap-2">
+                    {item.coin !== 'Total' && (
+                      <span className="text-xs font-bold text-gray-500 uppercase">{item.coin}:</span>
+                    )}
+                    <span className="text-2xl md:text-3xl font-bold text-[#00C2FF]">{item.hashrate}</span>
+                  </div>
+                ))}
+              </div>
               <p className="text-gray-500 text-sm mt-1">total</p>
             </div>
           </div>
@@ -447,10 +493,10 @@ const CustomerDashboard = ({ session, onLogout }) => {
                 <span className="text-xs bg-[#00C2FF]/20 text-[#00C2FF] px-2 py-0.5 rounded">Live</span>
               </div>
               <div className="flex items-center gap-4">
-                {calculateCustomerHashrate() && (
+                {getCustomerHashrateDisplay() && (
                   <div className="flex items-center gap-1 text-sm">
                     <Zap size={14} className="text-[#00C2FF]" />
-                    <span className="text-[#00C2FF] font-bold">{calculateCustomerHashrate()}</span>
+                    <span className="text-[#00C2FF] font-bold">{getCustomerHashrateDisplay()}</span>
                   </div>
                 )}
                 <span className="text-xs text-gray-500">

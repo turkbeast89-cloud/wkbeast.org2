@@ -31,6 +31,7 @@ const AdminPanel = () => {
     machines_online: 2430,
     machines_offline: 10,
     total_hashrate: "850 TH/s",
+    total_hashrate_by_coin: "",
     fluctuation: 5
   });
   const [maintenanceLogs, setMaintenanceLogs] = useState([]);
@@ -288,7 +289,7 @@ const AdminPanel = () => {
             />
           </div>
           <div>
-            <Label>Total Hashrate</Label>
+            <Label>Total Hashrate (Legacy - single value)</Label>
             <Input
               value={farmStats.total_hashrate}
               onChange={(e) => setFarmStats({ ...farmStats, total_hashrate: e.target.value })}
@@ -296,6 +297,18 @@ const AdminPanel = () => {
               placeholder="850 TH/s"
               data-testid="hashrate-input"
             />
+            <p className="text-xs text-gray-500 mt-1">Used only if per-coin field is empty</p>
+          </div>
+          <div className="md:col-span-2">
+            <Label>Hashrate by Coin</Label>
+            <Input
+              value={farmStats.total_hashrate_by_coin || ""}
+              onChange={(e) => setFarmStats({ ...farmStats, total_hashrate_by_coin: e.target.value })}
+              className="bg-[#0A0A0A] border-[#27272A] mt-1"
+              placeholder="LTC:500 GH/s, KAS:350 TH/s"
+              data-testid="hashrate-by-coin-input"
+            />
+            <p className="text-xs text-gray-500 mt-1">Format: LTC:500 GH/s, KAS:350 TH/s (shows each coin separately on dashboard)</p>
           </div>
           <div>
             <Label>Fluctuation (±)</Label>

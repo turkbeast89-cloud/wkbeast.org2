@@ -142,12 +142,14 @@ class FarmStats(BaseModel):
     machines_online: int = 2430
     machines_offline: int = 10
     total_hashrate: str = "850 TH/s"
+    total_hashrate_by_coin: str = ""  # Format: "LTC:500 GH/s,KAS:350 TH/s"
     fluctuation: int = 5  # Random +/- range
 
 class FarmStatsUpdate(BaseModel):
     machines_online: Optional[int] = None
     machines_offline: Optional[int] = None
     total_hashrate: Optional[str] = None
+    total_hashrate_by_coin: Optional[str] = None
     fluctuation: Optional[int] = None
 
 class ViaBTCSettings(BaseModel):

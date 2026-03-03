@@ -23,62 +23,74 @@ The user wants a full-stack application to manage their crypto mining farm.
     -   Customers can view their payment history and maintenance logs.
     -   Display impressive, manually-adjustable overall farm statistics (e.g., 2430 machines online, 10 offline) to build customer confidence.
 -   **ViaBTC Integration:**
-    -   Integrate with the user's ViaBTC account via API to automatically fetch and display machine status and hashrate in the customer portal.
+    -   Integrate with the user's ViaBTC account via API to automatically fetch and display machine status and hashrate in the customer portal. This should support a main account and multiple customer sub-accounts, each with their own API keys. It should also support multiple coin types like LTC and KAS.
 
 **User's preferred language**: English
 
 **what currently exists?**
-A full-stack application with a React frontend, FastAPI backend, and a cloud-hosted MongoDB database. Core features like customer/machine management, payment tracking, and a profit dashboard are implemented. The application is password-protected ().
+A full-stack application with a React frontend, FastAPI backend, and MongoDB. The admin application is protected by a password (), and a separate Customer Portal () provides customer-specific logins.
 
-The agent has started building the new Customer Portal. Frontend pages for customer login, a customer dashboard, and an admin panel have been created. Corresponding backend endpoints have been added to support these features, including user authentication and fetching customer-specific data. Initial customer accounts have been created with passwords derived from their phone numbers.
+The ViaBTC integration is fully implemented. The admin can set a main API key, test the connection, and automatically sync all customer sub-account API keys. The customer dashboard successfully displays live worker data (hashrate, status) for multiple coin types (LTC, KAS), ensuring each customer only sees their own data. The main admin account () has a view of all workers across all sub-accounts.
+
+Other completed features include:
+- A manual profit-setting feature in the admin panel, with fluctuating profit display on the customer dashboard.
+- A prominent payment reminder banner in the customer portal with a countdown to the deadline (2nd of each month) and an OVERDUE state.
+- A Contact Support WhatsApp link.
+- UI fixes for modal scrolling and a logout button for the admin.
 
 **Last working item**:
--   **Last item agent was working:** The agent was in the process of implementing and testing the new Customer Portal. It had just created the backend endpoints, generated user accounts, and confirmed the customer login page () was rendering correctly. The agent was about to test the login functionality and the customer dashboard.
+-   **Last item agent was working:** The user requested that the Farm Status section on the customer dashboard show separate total hashrates for each coin type (e.g., LTC: X GH/s, KAS: Y TH/s) instead of one combined, incorrect total. The agent had started looking into  to implement this.
 -   **Status:** IN PROGRESS
 -   **Agent Testing Done:** N
--   **Which testing method agent to use?** both
+-   **Which testing method agent to use?** screenshot tool
 -   **User Testing Done:** N
 
 **All Pending/In progress Issue list**:
--   **Issue 1:** The application is prone to  serialization errors when returning data from MongoDB. This has been fixed in some places but is a recurring problem with new endpoints.
-    -   **Attempted fixes:** The agent has previously used  and Pydantic models to correctly serialize MongoDB documents.
-    -   **Next debug checklist:** Review all new endpoints created for the customer portal and admin panel (, , ) in . Ensure their return values are properly serialized to prevent the  error.
-    -   **Why fix this issue and what will be achieved with the fix?** Fixing this will prevent API crashes and ensure the customer portal and admin panel are functional.
+-   **Issue 1:** (P0) The farm's total hashrate displayed in the Farm Status section is a mathematically incorrect combination of hashrates from different coin types (e.g., GH/s + TH/s).
+    -   **Attempted fixes:** The agent viewed .
+    -   **Next debug checklist:**
+        1.  In , locate the  state and its calculation logic.
+        2.  Modify the logic to group workers by  (e.g., 'LTC', 'KAS') and calculate a separate total hashrate for each group.
+        3.  Update the JSX for the Farm Status component to iterate over the grouped totals and display a separate line for each coin (e.g., , ).
+    -   **Why fix this issue and what will be achieved with the fix?** To provide a meaningful and accurate overview of the farm's performance, as requested by the user.
     -   **Status:** IN PROGRESS
-    -   **Is recurring issue?** Y
-    -   **Should Test frontend/backend/both after fix?** backend
+    -   **Is recurring issue?** N
+    -   **Should Test frontend/backend/both after fix?** frontend
+    -   **Blocked on other issue:** None
 
 **In progress Task List**:
--   **Task 1:** Complete the Customer Portal and Admin Panel implementation.
-    -   **Where to resume:** The agent has just confirmed the customer login page renders. The next step is to test the entire flow: customer login, view the dashboard (), and then test the Admin Panel () for managing users and farm stats.
-    -   **What will be achieved with this?** This will deliver the customer-facing part of the application and the tools for the user to manage it.
+-   **Task 1:** Complete the implementation of per-coin hashrate totals.
+    -   **Where to resume:** .
+    -   **What will be achieved with this?** The farm status display will be accurate and more detailed.
     -   **Status:** IN PROGRESS
-    -   **Should Test frontend/backend/both after fix?** both
+    -   **Should Test frontend/backend/both after fix?** frontend
     -   **Blocked on something:** None
 
 **Upcoming and Future Tasks**
 -   **Upcoming Tasks:**
-    -   **(P0) ViaBTC Integration:** Build a settings page in the Admin Panel for the user to enter their ViaBTC API keys. Implement the backend logic to fetch worker status and hashrate, and display it on the customer dashboard.
-    -   **(P1) Live Earnings Calculator:** Use the  library to connect to a crypto price API and display live earnings estimates for customers based on their machine's hashrate.
-    -   **(P1) Maintenance Log Feature:** Add functionality for the admin to add maintenance notes for machines and for customers to view these logs in their portal.
+    -   **(P1) Live Earnings Calculator:** Replace the manual profit entry system with a live data feed from a crypto price API like CoinGecko.
+    -   **(P1) Maintenance Log Feature:** Add functionality for the admin to add maintenance notes for machines and for customers to view them.
     -   **(P2) In-App Notifications:** Display notifications within the customer portal when a machine goes offline.
     -   **(P2) Auto-Payment Confirmation Flow:** Allow customers to mark a payment as Paid and create an approval queue for the admin.
 -   **Future Tasks:**
     -   **Monthly Performance Reports:** Generate and send automated performance reports to customers.
-    -   **Custom Domain:** Guide the user to link a custom domain to their deployed application.
+    -   **Custom Domain:** Guide the user on linking a custom domain.
 
 **Completed work in this session**
--   **Cloud Migration:** Successfully pivoted the application from a local Electron desktop app to a cloud-hosted web app with a synchronized MongoDB Atlas database.
--   **Data Migration:** Imported the user's existing customer, machine, and payment data from a local JSON file into the cloud database.
--   **Password Protection:** Implemented a site-wide password () for admin access.
--   **Feature Enhancements:** Added a machine counter to the main dashboard and improved the data import logic to handle variations in machine names.
--   **Customer Portal Scaffolding:** Created the initial backend and frontend structure for the customer portal, including API endpoints, React pages, and user account generation.
+-   **Full ViaBTC Integration:** Implemented a robust integration that handles a main admin account, multiple customer sub-accounts with individual API keys, and automatic syncing. It correctly fetches and displays live worker data for multiple coin types (LTC, KAS) and ensures data isolation between customers.
+-   **Profit Estimation Feature:** Created an admin interface to manually set daily profit per machine type and added a fluctuating profit display to the customer dashboard.
+-   **Payment Reminder System:** Built a dynamic banner in the customer portal that shows pending payments, a live countdown to the deadline, and an OVERDUE status.
+-   **Authentication & UI Enhancements:**
+    -   Enforced  for simplified customer login.
+    -   Added a logout button for the admin.
+    -   Added a Contact Support WhatsApp button.
+    -   Fixed several UI bugs, including modal overflow and incorrect hashrate displays.
 
 **Earlier issues found/mentioned but not fixed**
--   None.
+-   The application remains potentially prone to  serialization errors from MongoDB, as the backend is a large monolithic file () and new endpoints may not have been rigorously checked for this.
 
 **Known issue recurrence from previous fork**
--   Not applicable.
+-   None.
 
 **Code Architecture**
 
@@ -87,68 +99,77 @@ The agent has started building the new Customer Portal. Frontend pages for custo
 -   **Frontend:** React, Tailwind CSS, shadcn/ui
 -   **Backend:** FastAPI (Python)
 -   **Database:** MongoDB Atlas (Cloud)
--   **Architecture:** A monolithic full-stack web application. It was previously an Electron app, so legacy code exists.
+-   **Architecture:** Monolithic full-stack web application.
 
 **key DB schema**
 -   **customers**: 
 -   **machine_types**: 
 -   **payments**: 
 -   **users**:  (for customer portal)
--   **farm_stats**:  (for the display stats)
+-   **farm_stats**: 
+-   **viabtc_settings**: 
 
 **changes in tech stack**
--   The data persistence layer was changed from a local JSON file () to a cloud-hosted MongoDB database to support multi-device access and data synchronization.
+-   None in this session.
 
 **All files of reference**
--   : Contains all application logic and API endpoints. Recently modified to add endpoints for the customer portal.
--   : The main React router, updated to include routes for , , and .
--   : The new login page for customers.
--   : The dashboard customers see after logging in.
--   : The new page for the admin to manage portal users and settings.
+-   : Heavily modified with all logic for ViaBTC integration, profit settings, and enhanced customer account management.
+-   : The core of the customer portal. Contains all logic for displaying payment alerts, live ViaBTC data, and profit estimates.
+-   : The main control panel for the admin, used for ViaBTC settings, user management, and farm stats configuration.
+-   : Contains the UI for setting daily profit per machine type.
+-   : Modified to add a link to the customer portal.
+-   : Modified to add the admin logout button.
 
-**Areas that need refactoring**
--   The  file is becoming very large and should be modularized by splitting API routes into separate files (e.g., , ).
--   The  directory contains legacy code from the initial Electron app build and should be considered for cleanup to avoid confusion.
+**Areas that need refactoring**:
+-   The  file is now extremely large and complex. It should be broken down into smaller, modular routers (e.g., , , ) to improve maintainability.
+-   The  directory contains legacy code and should be removed to avoid confusion.
 
 **key api endpoints**
--   : Main app password verification.
--   : Imports data from user's JSON file.
--   : New endpoint for customer portal authentication.
--   : New endpoint to fetch data for the customer's dashboard.
--   : New endpoint to get/set the manually-adjusted farm statistics.
--   : New endpoint to generate customer user accounts.
+-   : Tests the main ViaBTC API credentials.
+-   : GET/POST for the main ViaBTC credentials.
+-   : Triggers the sync of all customer sub-account API keys from ViaBTC.
+-   : Fetches live worker data for the logged-in customer.
+-   : Refreshes the logged-in user's session data.
+-   : (PUT) Updates the  for a machine type.
 
 **Critical Info for New Agent**
--   The project has pivoted from a local desktop app to a cloud-hosted web app. The code in the  directory is largely deprecated.
--   There are two layers of authentication: a simple site-wide password () for the admin, and a new username/password system for customers to access their portal.
--   The user wants to integrate with ViaBTC. You will need to build a secure settings page for the user to enter their API keys. **Do not ask for the Secret Key in the chat.**
--   The impressive farm stats (e.g., 2430 online / 10 offline) are a key requirement and must be manually configurable by the user from the admin panel.
+-   The ViaBTC integration is complex. The app uses a main API key to sync all sub-account keys/secrets. It then uses the specific sub-account key to fetch that customer's data.  must equal the ViaBTC sub-account name for the sync to work.
+-   The  account is a special admin-level customer account that uses the main API key to see all workers from all sub-accounts.
+-   The Farm Status numbers (total machines, total hashrate) are manually set cosmetic stats that fluctuate. The customer's *actual* data is displayed in the Live Worker Status section.
+-   The payment deadline is hardcoded to the 2nd of each month at 12:00. The UI handles the countdown and OVERDUE logic.
 
 **documents and test reports created in this job**
 -   
+-   
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  **User (pending):** Asked for a customer portal with specific features like machine status, payment history, and integration with ViaBTC for live data. They also want to display large, manually-adjustable farm health stats to impress clients and want a simple password system for customers (last 4 digits of their phone number).
-2.  **Agent (in progress):** Acknowledged the request, clarified the ViaBTC API key handling, and began building the customer portal, starting with the backend models, API endpoints, and frontend pages.
+1.  **User:** The total farm hashrate is wrong. Don't combine LTC and KAS hashrates. Show them separately.
+2.  **Agent:** Started working on separating the hashrate totals by coin type. (IN PROGRESS)
+3.  **User:** Pointed out the farm total hashrate was showing the customer's total, not the impressive farm-wide total.
+4.  **Agent:** Fixed it by separating the cosmetic farm-wide stats from the customer's actual stats. (DONE)
+5.  **User:** Asked for a WhatsApp support link.
+6.  **Agent:** Added a Contact Support button linking to WhatsApp. (DONE)
+7.  **User:** Wants the app to show workers for all coin types (KAS, etc.), not just LTC, and to hide invalid workers.
+8.  **Agent:** Implemented fetching for all coins, added coin-specific badges, and filtered out invalid workers. (DONE)
+9.  **User:** The main  account can't see its workers.
+10. **Agent:** Fixed the  account to use the main API key and display all workers from all sub-accounts. (DONE)
 
 **Project Health Check:**
--   **Broken:** The new customer portal and admin panel are mid-development and not yet functional or tested.
--   **Mocked:** The prominent farm statistics displayed to customers are intended to be manually set by the admin, not based on real-time aggregate data.
+-   **Broken:** The Farm Status hashrate display is showing an incorrect, combined total instead of a per-coin breakdown.
+-   **Mocked:** The prominent Farm Status statistics (total machines online, total farm hashrate) are manually configured by the admin and are not based on real-time aggregate data.
 
 **3rd Party Integrations**
--   **ViaBTC (Mining Pool):** Planned integration. The goal is to use their API to pull live worker status and hashrate. An admin settings page is required for the user to securely input their API keys.
--   **Live Crypto Price API (Planned):** An API (like CoinGecko) will be needed for the earnings calculator feature.  has been installed in preparation for this.
+-   **ViaBTC (Mining Pool):** Fully integrated. Fetches worker status, hashrate, and coin type for main and sub-accounts.
 
 **Testing status**
 -   **Testing agent used after significant changes:** YES
 -   **Troubleshoot agent used after agent stuck in loop:** NO
 -   **Test files created:** []
--   **Known regressions:** []
+-   **Known regressions:** The farm status hashrate display is functionally incorrect.
 
 **Credentials to test flow:**
 -   **Main App Password:** 
--   **Customer Portal Login:** Username is the customer's name (e.g., ). The password is the last 4 digits of their phone number (e.g.,  for a phone number ending in ).
+-   **Customer Portal Login:** Username is the ViaBTC sub-account name (e.g., , ). The password is the last 4 digits of their phone number. For , use .
 
 **What agent forgot to execute**
--   The agent started the customer portal feature but has not yet tested the admin panel functionality.
--   The agent has not implemented the core logic for the ViaBTC integration or the live earnings calculator, despite installing a required library ().</analysis>
+-   The agent did not complete the user's final request to separate the farm's total hashrate display by coin type. The task was started but left unfinished.</analysis>

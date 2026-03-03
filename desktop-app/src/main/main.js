@@ -4,7 +4,7 @@ const path = require('path');
 let mainWindow;
 
 // Use the cloud backend URL
-const BACKEND_URL = 'https://crypto-ops-1.preview.emergentagent.com';
+const BACKEND_URL = 'https://crypto-mine-manager.preview.emergentagent.com';
 
 function createWindow() {
   mainWindow = new BrowserWindow({
