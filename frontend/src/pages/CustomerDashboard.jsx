@@ -311,8 +311,8 @@ const CustomerDashboard = ({ session, onLogout }) => {
     }
     
     return [
-      { coin: 'LTC', hashrate: ltcDisplay },
-      { coin: 'KAS', hashrate: `${kasFinalTHs.toFixed(1)} TH/s` }
+      { coin: 'LTC', hashrate: ltcDisplay, machines: ltcMachines },
+      { coin: 'KAS', hashrate: `${kasFinalTHs.toFixed(1)} TH/s`, machines: kasMachines }
     ];
   };
   
@@ -478,10 +478,9 @@ const CustomerDashboard = ({ session, onLogout }) => {
               <div className="space-y-1">
                 {getFarmHashrateByCoin().map((item, idx) => (
                   <div key={idx} className="flex items-center justify-center gap-2">
-                    {item.coin !== 'Total' && (
-                      <span className="text-xs font-bold text-gray-500 uppercase">{item.coin}:</span>
-                    )}
+                    <span className="text-xs font-bold text-gray-500 uppercase">{item.coin}:</span>
                     <span className="text-2xl md:text-3xl font-bold text-[#00C2FF]">{item.hashrate}</span>
+                    <span className="text-xs text-gray-600">({item.machines.toLocaleString()})</span>
                   </div>
                 ))}
               </div>
