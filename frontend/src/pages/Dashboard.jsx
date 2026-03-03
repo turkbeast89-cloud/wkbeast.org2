@@ -248,6 +248,31 @@ const Dashboard = () => {
           )}
         </div>
       </div>
+
+      {/* Machine Counter Breakdown */}
+      {machineData.length > 0 && (
+        <div className="chart-container">
+          <h3 className="text-lg font-bold text-white mb-4">Machine Counter</h3>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+            {machineData.map((machine, idx) => (
+              <div 
+                key={machine.name}
+                className="p-4 rounded-lg border border-[#27272A] bg-[#0A0A0A] hover:border-[#00E054]/50 transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <div 
+                    className="w-3 h-3 rounded-full"
+                    style={{ backgroundColor: COLORS[idx % COLORS.length] }}
+                  />
+                  <span className="text-gray-400 text-sm">{machine.name}</span>
+                </div>
+                <p className="text-2xl font-bold text-white mt-2">{machine.value}</p>
+                <p className="text-xs text-gray-500">machines</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

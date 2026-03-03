@@ -291,11 +291,14 @@ function startServer() {
       const totalCollected = data.payments.filter(p => p.status === 'paid').reduce((sum, p) => sum + p.amount, 0);
       const totalPending = data.payments.filter(p => p.status === 'unpaid').reduce((sum, p) => sum + p.amount, 0);
       
-      // Machine breakdown
+      // Machine breakdown (normalize variants like L9-275 → L9)
       const machineCounts = {};
       for (const c of data.customers) {
         for (const m of c.machines || []) {
-          machineCounts[m.machine_name] = (machineCounts[m.machine_name] || 0) + m.quantity;
+          let name = m.machine_name || 'Unknown';
+          // Normalize: L9-275, L9-260 → L9
+          const baseName = name.toUpperCase().replace(/[-_]\d+$/, '');
+          machineCounts[baseName] = (machineCounts[baseName] || 0) + m.quantity;
         }
       }
       
@@ -398,6 +401,18 @@ function startServer() {
         const ws = wb.Sheets[wb.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json(ws);
         
+        // Helper to normalize machine names
+        const normalizeMachineName = (name) => {
+          name = name.trim().toUpperCase();
+          name = name.replace(/[-_]\d+$/, ''); // Remove variants like -275, -260
+          const nameMap = { 'KS5L': 'KS5PRO', 'KS5': 'KS5PRO' };
+          return nameMap[name] || name;
+        };
+        
+        const machineNameMap = Object.fromEntries(
+          data.machine_types.map(m => [m.name.toUpperCase(), m])
+        );
+        
         let imported = 0;
         const errors = [];
         
@@ -408,18 +423,54 @@ function startServer() {
             if (!name) continue;
             
             const phone = String(row.Phone || row.phone || '').trim();
+            const machinesStr = String(row.Machines || row.machines || '').trim();
             const cost = parseFloat(row['Your Cost'] || row.cost || 0) || 0;
-            const fee = parseFloat(row['Customer Fee'] || row.fee || 0) || 0;
+            const fee = parseFloat(row['Customer Fee'] || row.Customer || row.fee || 0) || 0;
+            const status = String(row.Status || row.status || 'active').toLowerCase();
+            const prepaid = parseInt(row['Prepaid M'] || row.Prepaid || row.prepaid_months || 0) || 0;
+            
+            // Parse machines string like "1x L9", "2x L9, 1x L7", "3x L9-275"
+            const machines = [];
+            let totalFee = 0;
+            const machineTotals = {};
+            
+            if (machinesStr) {
+              const parts = machinesStr.match(/(\d+)\s*x\s*([a-zA-Z0-9\-_]+)/gi) || [];
+              for (const part of parts) {
+                const match = part.match(/(\d+)\s*x\s*([a-zA-Z0-9\-_]+)/i);
+                if (match) {
+                  const qty = parseInt(match[1]) || 1;
+                  const normalizedName = normalizeMachineName(match[2]);
+                  machineTotals[normalizedName] = (machineTotals[normalizedName] || 0) + qty;
+                }
+              }
+              
+              for (const [normalizedName, qty] of Object.entries(machineTotals)) {
+                if (machineNameMap[normalizedName]) {
+                  const mt = machineNameMap[normalizedName];
+                  machines.push({
+                    machine_type_id: mt.id,
+                    machine_name: mt.name,
+                    quantity: qty
+                  });
+                  totalFee += mt.monthly_fee * qty;
+                }
+              }
+            }
+            
+            if (totalFee === 0) totalFee = fee;
+            
+            const normalizedStatus = ['paused', 'pause', 'inactive', 'off'].includes(status) ? 'paused' : 'active';
             
             data.customers.push({
               id: uuidv4(),
               name,
               phone,
-              machines: [],
+              machines,
               total_cost: cost,
-              total_fee: fee,
-              status: 'active',
-              prepaid_months: 0,
+              total_fee: totalFee,
+              status: normalizedStatus,
+              prepaid_months: prepaid,
               notes: '',
               created_at: new Date().toISOString()
             });

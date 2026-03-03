@@ -334,13 +334,16 @@ async def get_stats():
     total_collected = sum(p.get("amount", 0) for p in payments if p.get("status") == "paid")
     total_pending = sum(p.get("amount", 0) for p in payments if p.get("status") == "unpaid")
     
-    # Machine breakdown
+    # Machine breakdown (normalize variants like L9-275 → L9)
     machine_counts = {}
     for c in customers:
         for m in c.get("machines", []):
             name = m.get("machine_name", "Unknown")
+            # Normalize: L9-275, L9-260 → L9
+            import re
+            base_name = re.sub(r'[-_]\d+$', '', name.upper())
             qty = m.get("quantity", 1)
-            machine_counts[name] = machine_counts.get(name, 0) + qty
+            machine_counts[base_name] = machine_counts.get(base_name, 0) + qty
     
     return {
         "total_customers": total_customers,
@@ -464,6 +467,19 @@ async def generate_whatsapp_links(month: str, include_paid: bool = False):
 
 # ==================== EXCEL IMPORT/EXPORT ====================
 
+def normalize_machine_name(name):
+    """Normalize machine names like L9-275, l9-260, L9 to base type L9"""
+    import re
+    name = name.strip().upper()
+    # Remove variants like -275, -260, -250
+    name = re.sub(r'[-_]\d+$', '', name)
+    # Common normalizations
+    name_map = {
+        'KS5L': 'KS5PRO',
+        'KS5': 'KS5PRO',
+    }
+    return name_map.get(name, name)
+
 @api_router.post("/import/excel")
 async def import_excel(file: UploadFile = File(...)):
     """Import customers from Excel file"""
@@ -473,39 +489,60 @@ async def import_excel(file: UploadFile = File(...)):
     
     # Get machine types for mapping
     machine_types = await db.machine_types.find({}, {"_id": 0}).to_list(100)
-    machine_name_map = {mt["name"].lower(): mt for mt in machine_types}
+    machine_name_map = {mt["name"].upper(): mt for mt in machine_types}
     
     imported = 0
     errors = []
     
+    # Get header row to find column indices
+    headers = [str(cell).strip().lower() if cell else "" for cell in next(ws.iter_rows(min_row=1, max_row=1, values_only=True))]
+    
+    # Find column indices
+    name_idx = next((i for i, h in enumerate(headers) if 'name' in h), 0)
+    phone_idx = next((i for i, h in enumerate(headers) if 'phone' in h), 1)
+    machines_idx = next((i for i, h in enumerate(headers) if 'machine' in h), 2)
+    cost_idx = next((i for i, h in enumerate(headers) if 'cost' in h or 'your' in h), 3)
+    fee_idx = next((i for i, h in enumerate(headers) if 'fee' in h or 'customer' in h), 4)
+    status_idx = next((i for i, h in enumerate(headers) if 'status' in h), 5)
+    prepaid_idx = next((i for i, h in enumerate(headers) if 'prepaid' in h), 6)
+    
     # Skip header row
     for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
         try:
-            if not row[0]:  # Skip empty rows
+            if not row or not row[name_idx]:  # Skip empty rows
                 continue
             
-            name = str(row[0]).strip()
-            equipment = str(row[1]).strip() if row[1] else ""
-            cost = float(row[2]) if row[2] else 0
-            fee = float(row[3]) if row[3] else 0
-            phone = str(row[4]).strip() if len(row) > 4 and row[4] else ""
+            name = str(row[name_idx]).strip()
+            phone = str(row[phone_idx]).strip() if len(row) > phone_idx and row[phone_idx] else ""
+            machines_str = str(row[machines_idx]).strip() if len(row) > machines_idx and row[machines_idx] else ""
+            cost = float(row[cost_idx]) if len(row) > cost_idx and row[cost_idx] else 0
+            fee = float(row[fee_idx]) if len(row) > fee_idx and row[fee_idx] else 0
+            status = str(row[status_idx]).strip().lower() if len(row) > status_idx and row[status_idx] else "active"
+            prepaid = int(row[prepaid_idx]) if len(row) > prepaid_idx and row[prepaid_idx] else 0
             
-            # Parse equipment string to get machines
+            # Parse machines string like "1x L9", "2x L9, 1x L7", "9x L9, 1x L1", "3x L9-275"
             machines = []
             total_fee = 0
             
-            # Try to parse equipment like "2Ks5pro L9" or "ks5pro l7 4l9 + 2 L1"
-            # This is a basic parser - can be improved
-            if equipment:
+            if machines_str:
                 import re
-                # Find patterns like "2L9", "4l9", "ks5pro", etc.
-                parts = re.findall(r'(\d*)\s*([a-zA-Z0-9]+)', equipment)
+                # Find patterns like "1x L9", "2x L9-275", "1x ks5pro"
+                parts = re.findall(r'(\d+)\s*x\s*([a-zA-Z0-9\-_]+)', machines_str, re.IGNORECASE)
+                
+                machine_totals = {}  # Aggregate same machine types
+                
                 for qty_str, machine_name in parts:
                     qty = int(qty_str) if qty_str else 1
-                    machine_key = machine_name.lower()
+                    normalized_name = normalize_machine_name(machine_name)
                     
-                    if machine_key in machine_name_map:
-                        mt = machine_name_map[machine_key]
+                    if normalized_name in machine_totals:
+                        machine_totals[normalized_name] += qty
+                    else:
+                        machine_totals[normalized_name] = qty
+                
+                for normalized_name, qty in machine_totals.items():
+                    if normalized_name in machine_name_map:
+                        mt = machine_name_map[normalized_name]
                         machines.append({
                             "machine_type_id": mt["id"],
                             "machine_name": mt["name"],
@@ -517,13 +554,20 @@ async def import_excel(file: UploadFile = File(...)):
             if total_fee == 0:
                 total_fee = fee
             
+            # Normalize status
+            if status in ['paused', 'pause', 'inactive', 'off']:
+                status = 'paused'
+            else:
+                status = 'active'
+            
             customer = Customer(
                 name=name,
                 phone=phone,
                 machines=machines,
                 total_cost=cost,
                 total_fee=total_fee,
-                status="active"
+                status=status,
+                prepaid_months=prepaid
             )
             
             await db.customers.insert_one(customer.model_dump())
