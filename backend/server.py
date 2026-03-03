@@ -31,11 +31,13 @@ class MachineType(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
     monthly_fee: float
+    daily_profit: float = 0.0  # Daily profit estimate from asicminervalue.com
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 class MachineTypeCreate(BaseModel):
     name: str
     monthly_fee: float
+    daily_profit: float = 0.0
 
 class CustomerMachine(BaseModel):
     machine_type_id: str
@@ -182,7 +184,7 @@ async def create_machine_type(data: MachineTypeCreate):
 async def update_machine_type(type_id: str, data: MachineTypeCreate):
     result = await db.machine_types.find_one_and_update(
         {"id": type_id},
-        {"$set": {"name": data.name, "monthly_fee": data.monthly_fee}},
+        {"$set": {"name": data.name, "monthly_fee": data.monthly_fee, "daily_profit": data.daily_profit}},
         return_document=True,
         projection={"_id": 0}
     )
@@ -744,6 +746,24 @@ async def get_customer_dashboard(customer_id: str):
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
     
+    # Get machine types with daily profit
+    machine_types = await db.machine_types.find({}, {"_id": 0}).to_list(100)
+    machine_types_map = {mt["id"]: mt for mt in machine_types}
+    
+    # Enrich customer machines with daily profit info
+    enriched_machines = []
+    total_daily_profit = 0
+    for m in customer.get("machines", []):
+        mt = machine_types_map.get(m["machine_type_id"], {})
+        daily_profit = mt.get("daily_profit", 0) * m.get("quantity", 1)
+        total_daily_profit += daily_profit
+        enriched_machines.append({
+            **m,
+            "machine_type_name": mt.get("name", m.get("machine_name", "Unknown")),
+            "daily_profit": mt.get("daily_profit", 0),
+            "total_daily_profit": daily_profit
+        })
+    
     # Get machine statuses
     machine_statuses = await db.machine_statuses.find({"customer_id": customer_id}, {"_id": 0}).to_list(100)
     
@@ -765,6 +785,9 @@ async def get_customer_dashboard(customer_id: str):
     
     return {
         "customer": customer,
+        "enriched_machines": enriched_machines,
+        "total_daily_profit": total_daily_profit,
+        "total_monthly_profit": total_daily_profit * 30,
         "machine_statuses": machine_statuses,
         "payments": payments,
         "maintenance_logs": logs,

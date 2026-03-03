@@ -51,11 +51,14 @@ const CustomerDashboard = ({ session, onLogout }) => {
     onLogout();
   };
 
-  // Calculate estimated earnings based on machine type
-  const calculateEarnings = (machines) => {
+  // Get monthly profit from backend enriched data
+  const getMonthlyProfit = () => {
+    if (dashboard?.total_monthly_profit && dashboard.total_monthly_profit > 0) {
+      return dashboard.total_monthly_profit.toFixed(2);
+    }
+    // Fallback: Calculate estimated earnings based on machine type and crypto prices
     let total = 0;
-    machines?.forEach(m => {
-      // Rough estimates per machine type per month
+    dashboard?.customer?.machines?.forEach(m => {
       const earnings = {
         "L9": 15 * prices.ltc,
         "L9-250": 14 * prices.ltc,
@@ -72,6 +75,14 @@ const CustomerDashboard = ({ session, onLogout }) => {
       total += machineEarning * (m.quantity || 1);
     });
     return total.toFixed(2);
+  };
+
+  // Get daily profit
+  const getDailyProfit = () => {
+    if (dashboard?.total_daily_profit && dashboard.total_daily_profit > 0) {
+      return dashboard.total_daily_profit.toFixed(2);
+    }
+    return (parseFloat(getMonthlyProfit()) / 30).toFixed(2);
   };
 
   if (loading) {
@@ -223,13 +234,24 @@ const CustomerDashboard = ({ session, onLogout }) => {
         <div className="bg-gradient-to-r from-[#00E054]/10 to-[#00C2FF]/10 rounded-xl border border-[#00E054]/30 p-6">
           <div className="flex items-center gap-2 mb-2">
             <TrendingUp className="text-[#00E054]" size={20} />
-            <h2 className="text-lg font-bold text-white">Estimated Monthly Earnings</h2>
+            <h2 className="text-lg font-bold text-white">Estimated Earnings</h2>
           </div>
-          <p className="text-4xl font-bold text-[#00E054] mb-2">
-            ~${calculateEarnings(customer?.machines)}
-          </p>
+          <div className="flex items-baseline gap-4 mb-2">
+            <div>
+              <p className="text-4xl font-bold text-[#00E054]">
+                ~${getMonthlyProfit()}
+              </p>
+              <p className="text-xs text-gray-500">per month</p>
+            </div>
+            <div className="border-l border-[#27272A] pl-4">
+              <p className="text-2xl font-bold text-[#00C2FF]">
+                ~${getDailyProfit()}
+              </p>
+              <p className="text-xs text-gray-500">per day</p>
+            </div>
+          </div>
           <p className="text-sm text-gray-500">
-            Based on current prices: LTC ${prices.ltc?.toFixed(2)} • KAS ${prices.kas?.toFixed(4)} • ZEC ${prices.zec?.toFixed(2)}
+            Data from <a href="https://www.asicminervalue.com" target="_blank" rel="noopener noreferrer" className="text-[#00C2FF] hover:underline">asicminervalue.com</a>
           </p>
           <p className="text-xs text-gray-600 mt-2">* Estimates only. Actual earnings depend on network difficulty and market conditions.</p>
         </div>

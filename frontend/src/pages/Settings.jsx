@@ -2,18 +2,20 @@ import { useState, useEffect } from "react";
 import axios from "axios";
 import { API } from "../App";
 import { toast } from "sonner";
-import { Save, RotateCcw, MessageSquare, CreditCard, Users } from "lucide-react";
+import { Save, RotateCcw, MessageSquare, CreditCard, Users, Cpu, DollarSign, ExternalLink } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 
 const SettingsPage = () => {
   const [settings, setSettings] = useState(null);
+  const [machineTypes, setMachineTypes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     fetchSettings();
+    fetchMachineTypes();
   }, []);
 
   const fetchSettings = async () => {
@@ -27,6 +29,15 @@ const SettingsPage = () => {
     }
   };
 
+  const fetchMachineTypes = async () => {
+    try {
+      const res = await axios.get(`${API}/machine-types`);
+      setMachineTypes(res.data);
+    } catch (e) {
+      console.error("Failed to load machine types", e);
+    }
+  };
+
   const handleSave = async () => {
     setSaving(true);
     try {
@@ -37,6 +48,25 @@ const SettingsPage = () => {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleUpdateMachineType = async (mt) => {
+    try {
+      await axios.put(`${API}/machine-types/${mt.id}`, {
+        name: mt.name,
+        monthly_fee: mt.monthly_fee,
+        daily_profit: mt.daily_profit || 0
+      });
+      toast.success(`Updated ${mt.name}`);
+    } catch (e) {
+      toast.error("Failed to update machine type");
+    }
+  };
+
+  const updateMachineProfit = (id, value) => {
+    setMachineTypes(machineTypes.map(mt => 
+      mt.id === id ? { ...mt, daily_profit: parseFloat(value) || 0 } : mt
+    ));
   };
 
   const handleReset = () => {
@@ -142,6 +172,63 @@ Warm regards,
             data-testid="team-name-input"
           />
         </div>
+      </div>
+
+      {/* Machine Types - Daily Profit */}
+      <div className="card p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-[#F59E0B]/10">
+              <Cpu className="text-[#F59E0B]" size={20} />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-white">Machine Profit Estimates</h2>
+              <p className="text-xs text-gray-500">Daily profit per machine (from asicminervalue.com)</p>
+            </div>
+          </div>
+          <a 
+            href="https://www.asicminervalue.com/" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="text-xs text-[#00C2FF] hover:underline flex items-center gap-1"
+          >
+            View Live Prices <ExternalLink size={12} />
+          </a>
+        </div>
+        
+        <div className="space-y-3">
+          {machineTypes.map(mt => (
+            <div key={mt.id} className="flex items-center gap-4 p-3 bg-[#0A0A0A] rounded-lg border border-[#27272A]">
+              <div className="flex-1">
+                <p className="text-white font-medium">{mt.name}</p>
+                <p className="text-xs text-gray-500">Hosting: ${mt.monthly_fee}/mo</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <DollarSign size={14} className="text-[#00E054]" />
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={mt.daily_profit || 0}
+                  onChange={(e) => updateMachineProfit(mt.id, e.target.value)}
+                  className="w-24 bg-[#1A1A1A] border-[#27272A] text-right"
+                  placeholder="0.00"
+                />
+                <span className="text-xs text-gray-500 w-12">/day</span>
+                <Button 
+                  size="sm" 
+                  onClick={() => handleUpdateMachineType(mt)}
+                  className="bg-[#00E054] text-black"
+                >
+                  Save
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+        
+        <p className="text-xs text-gray-500 mt-3">
+          These values are shown to customers in their portal as "Estimated Monthly Earnings"
+        </p>
       </div>
 
       {/* Message Template */}
