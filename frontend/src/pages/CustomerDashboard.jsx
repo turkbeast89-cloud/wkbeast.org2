@@ -238,6 +238,30 @@ const CustomerDashboard = ({ session, onLogout }) => {
   const customerMachinesOnline = validWorkers.filter(w => w.worker_status === "active").length;
   const customerMachinesTotal = validWorkers.length;
 
+  // Calculate total hashrate from workers
+  const calculateTotalHashrate = () => {
+    if (!validWorkers || validWorkers.length === 0) {
+      return farm_stats?.total_hashrate || "850 TH/s";
+    }
+    
+    let totalHashrate = 0;
+    validWorkers.forEach(worker => {
+      const hashrate = parseInt(worker.hashrate_1hour || 0);
+      totalHashrate += hashrate;
+    });
+    
+    // Convert to appropriate unit (TH/s, GH/s, etc.)
+    if (totalHashrate >= 1000000000000) {
+      return `${(totalHashrate / 1000000000000).toFixed(2)} TH/s`;
+    } else if (totalHashrate >= 1000000000) {
+      return `${(totalHashrate / 1000000000).toFixed(2)} GH/s`;
+    } else if (totalHashrate >= 1000000) {
+      return `${(totalHashrate / 1000000).toFixed(2)} MH/s`;
+    } else {
+      return `${totalHashrate} H/s`;
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#050505]">
       {/* Header */}
@@ -360,7 +384,7 @@ const CustomerDashboard = ({ session, onLogout }) => {
                 <span className="text-gray-400 text-sm">Hashrate</span>
               </div>
               <p className="text-4xl md:text-5xl font-bold text-[#00C2FF]">
-                {farm_stats?.total_hashrate || "850 TH/s"}
+                {calculateTotalHashrate()}
               </p>
               <p className="text-gray-500 text-sm mt-1">total</p>
             </div>
