@@ -51,7 +51,7 @@ const AdminPanel = () => {
   const [editingAccount, setEditingAccount] = useState(null);
   
   // Forms
-  const [accountForm, setAccountForm] = useState({ customer_id: "", username: "", password: "", worker_name: "" });
+  const [accountForm, setAccountForm] = useState({ customer_id: "", username: "", password: "", worker_name: "", viabtc_api_key: "" });
   const [logForm, setLogForm] = useState({ customer_id: "", machine_info: "", description: "" });
   const [statusForm, setStatusForm] = useState({ customer_id: "", worker_name: "", status: "online", hashrate: "", temperature: "", uptime: "" });
 
@@ -435,6 +435,7 @@ const AdminPanel = () => {
                 <th className="text-left py-3 px-4">Username</th>
                 <th className="text-left py-3 px-4">Password</th>
                 <th className="text-left py-3 px-4">Worker Name</th>
+                <th className="text-left py-3 px-4">API Key</th>
                 <th className="text-right py-3 px-4">Actions</th>
               </tr>
             </thead>
@@ -445,8 +446,21 @@ const AdminPanel = () => {
                   <td className="py-3 px-4 text-gray-400">{account.username}</td>
                   <td className="py-3 px-4 font-mono text-gray-400">{account.password}</td>
                   <td className="py-3 px-4 text-gray-400">{account.worker_name || "-"}</td>
+                  <td className="py-3 px-4 font-mono text-xs text-gray-500">
+                    {account.viabtc_api_key ? account.viabtc_api_key.substring(0, 8) + "..." : <span className="text-red-400">Not set</span>}
+                  </td>
                   <td className="py-3 px-4 text-right">
-                    <Button size="icon" variant="ghost" onClick={() => { setEditingAccount(account); setAccountForm(account); setShowAccountModal(true); }}>
+                    <Button size="icon" variant="ghost" onClick={() => { 
+                      setEditingAccount(account); 
+                      setAccountForm({
+                        customer_id: account.customer_id,
+                        username: account.username,
+                        password: account.password,
+                        worker_name: account.worker_name || "",
+                        viabtc_api_key: account.viabtc_api_key || ""
+                      }); 
+                      setShowAccountModal(true); 
+                    }}>
                       <Edit2 size={16} />
                     </Button>
                     <Button size="icon" variant="ghost" className="text-red-400" onClick={() => handleDeleteAccount(account)}>
@@ -457,7 +471,7 @@ const AdminPanel = () => {
               ))}
               {accounts.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="py-8 text-center text-gray-500">
+                  <td colSpan={6} className="py-8 text-center text-gray-500">
                     No accounts yet. Click "Auto-Create All" to generate accounts for all customers.
                   </td>
                 </tr>
@@ -556,6 +570,16 @@ const AdminPanel = () => {
             <div>
               <Label>Worker Name (ViaBTC)</Label>
               <Input value={accountForm.worker_name} onChange={(e) => setAccountForm({ ...accountForm, worker_name: e.target.value })} className="bg-[#0A0A0A] border-[#27272A] mt-1" placeholder="Same as username" />
+            </div>
+            <div>
+              <Label>ViaBTC API Key (Customer's own key)</Label>
+              <Input 
+                value={accountForm.viabtc_api_key} 
+                onChange={(e) => setAccountForm({ ...accountForm, viabtc_api_key: e.target.value })} 
+                className="bg-[#0A0A0A] border-[#27272A] mt-1 font-mono text-xs" 
+                placeholder="e.g., caf2a5e9e3cbeaa5e67f5a71c420e8eb" 
+              />
+              <p className="text-xs text-gray-500 mt-1">Get from ViaBTC → Settings → API Management</p>
             </div>
           </div>
           <DialogFooter>

@@ -113,6 +113,7 @@ class CustomerAccount(BaseModel):
     username: str  # Customer name (lowercase, no spaces)
     password: str  # Last 4 digits of phone
     worker_name: str = ""  # ViaBTC worker name
+    viabtc_api_key: str = ""  # Customer's own ViaBTC API key
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 class CustomerAccountCreate(BaseModel):
@@ -120,6 +121,7 @@ class CustomerAccountCreate(BaseModel):
     username: str
     password: str
     worker_name: str = ""
+    viabtc_api_key: str = ""
 
 class MaintenanceLog(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -1191,22 +1193,27 @@ async def get_viabtc_hashrate(coin: str = "LTC"):
         return {"success": False, "error": str(e)}
 
 @api_router.get("/portal/worker-status/{worker_name}")
-async def get_worker_status(worker_name: str, coin: str = "LTC"):
-    """Get specific worker status from ViaBTC"""
+async def get_worker_status(worker_name: str, coin: str = "LTC", api_key: str = None):
+    """Get specific worker status from ViaBTC using customer's own API key"""
     import aiohttp
     import hashlib
     import hmac
     import time
     from urllib.parse import urlencode
     
+    # Get main account settings for secret key
     settings = await db.viabtc_settings.find_one({"id": "viabtc_settings"}, {"_id": 0})
     if not settings or not settings.get("enabled"):
         return {"success": False, "error": "ViaBTC not enabled", "worker": None}
     
-    if not settings.get("access_key") or not settings.get("secret_key"):
-        return {"success": False, "error": "API keys not configured", "worker": None}
+    if not settings.get("secret_key"):
+        return {"success": False, "error": "Secret key not configured", "worker": None}
     
-    access_key = settings["access_key"]
+    # Use customer's API key if provided, otherwise fall back to main
+    access_key = api_key if api_key else settings.get("access_key")
+    if not access_key:
+        return {"success": False, "error": "API key not configured", "worker": None}
+    
     secret_key = settings["secret_key"]
     
     try:

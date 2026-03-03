@@ -28,19 +28,23 @@ const CustomerDashboard = ({ session, onLogout }) => {
       setDashboard(dashData);
       setPrices(pricesData);
       
-      // Fetch worker data from ViaBTC - only for this customer's worker_name
+      // Fetch worker data from ViaBTC using customer's own API key
       const workerName = session.account?.worker_name;
-      if (workerName) {
+      const customerApiKey = session.account?.viabtc_api_key;
+      
+      if (workerName && customerApiKey) {
         try {
-          const workerRes = await fetch(`${API}/portal/worker-status/${encodeURIComponent(workerName)}?coin=LTC`);
+          const workerRes = await fetch(
+            `${API}/portal/worker-status/${encodeURIComponent(workerName)}?coin=LTC&api_key=${encodeURIComponent(customerApiKey)}`
+          );
           const workerInfo = await workerRes.json();
-          if (workerInfo.success && workerInfo.worker) {
-            // Only show THIS customer's worker, not all workers
+          if (workerInfo.success && workerInfo.all_workers?.length > 0) {
+            // Show all workers from this customer's account
             setWorkerData({
               success: true,
-              workers: [workerInfo.worker], // Only their worker
-              total: 1,
-              active: workerInfo.worker.worker_status === "active" ? 1 : 0
+              workers: workerInfo.all_workers,
+              total: workerInfo.all_workers.length,
+              active: workerInfo.all_workers.filter(w => w.worker_status === "active").length
             });
           } else {
             setWorkerData(null);
