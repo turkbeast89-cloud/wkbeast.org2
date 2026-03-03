@@ -2,19 +2,98 @@ import { useState, useEffect } from "react";
 import { 
   Cpu, Activity, Thermometer, Clock, DollarSign, 
   CheckCircle, XCircle, AlertCircle, LogOut, Wrench,
-  TrendingUp, Zap, Server, RefreshCw, Wifi, WifiOff
+  TrendingUp, Zap, Server, RefreshCw, Wifi, WifiOff,
+  AlertTriangle, Timer
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 
 const API = process.env.REACT_APP_BACKEND_URL + "/api";
 
+// Countdown timer component
+const PaymentCountdown = ({ deadline }) => {
+  const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+  const [isOverdue, setIsOverdue] = useState(false);
+
+  useEffect(() => {
+    const calculateTimeLeft = () => {
+      const now = new Date();
+      const diff = deadline - now;
+      
+      if (diff <= 0) {
+        setIsOverdue(true);
+        setTimeLeft({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+        return;
+      }
+      
+      setIsOverdue(false);
+      setTimeLeft({
+        days: Math.floor(diff / (1000 * 60 * 60 * 24)),
+        hours: Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)),
+        minutes: Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60)),
+        seconds: Math.floor((diff % (1000 * 60)) / 1000)
+      });
+    };
+
+    calculateTimeLeft();
+    const timer = setInterval(calculateTimeLeft, 1000);
+    return () => clearInterval(timer);
+  }, [deadline]);
+
+  if (isOverdue) {
+    return (
+      <div className="flex items-center gap-2 text-red-500">
+        <AlertTriangle size={16} className="animate-pulse" />
+        <span className="font-bold">OVERDUE - Machine may go offline!</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-3">
+      <Timer size={16} className="text-[#F59E0B]" />
+      <div className="flex gap-2">
+        <div className="bg-[#0A0A0A] px-2 py-1 rounded">
+          <span className="text-xl font-bold text-white">{timeLeft.days}</span>
+          <span className="text-xs text-gray-500 ml-1">d</span>
+        </div>
+        <div className="bg-[#0A0A0A] px-2 py-1 rounded">
+          <span className="text-xl font-bold text-white">{String(timeLeft.hours).padStart(2, '0')}</span>
+          <span className="text-xs text-gray-500 ml-1">h</span>
+        </div>
+        <div className="bg-[#0A0A0A] px-2 py-1 rounded">
+          <span className="text-xl font-bold text-white">{String(timeLeft.minutes).padStart(2, '0')}</span>
+          <span className="text-xs text-gray-500 ml-1">m</span>
+        </div>
+        <div className="bg-[#0A0A0A] px-2 py-1 rounded">
+          <span className="text-xl font-bold text-[#F59E0B]">{String(timeLeft.seconds).padStart(2, '0')}</span>
+          <span className="text-xs text-gray-500 ml-1">s</span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Get next payment deadline (2nd of next month at 12:00)
+const getPaymentDeadline = () => {
+  const now = new Date();
+  let deadline = new Date(now.getFullYear(), now.getMonth(), 2, 12, 0, 0);
+  
+  // If we're past the 2nd of this month, deadline is 2nd of next month
+  if (now > deadline) {
+    deadline = new Date(now.getFullYear(), now.getMonth() + 1, 2, 12, 0, 0);
+  }
+  
+  return deadline;
+};
+
 const CustomerDashboard = ({ session, onLogout }) => {
   const [dashboard, setDashboard] = useState(null);
   const [prices, setPrices] = useState({ ltc: 0, kas: 0, zec: 0 });
   const [workerData, setWorkerData] = useState(null);
-  const [accountData, setAccountData] = useState(session.account); // Use fresh account data
+  const [accountData, setAccountData] = useState(session.account);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [paymentDeadline] = useState(getPaymentDeadline());
 
   const fetchData = async () => {
     try {
@@ -140,6 +219,12 @@ const CustomerDashboard = ({ session, onLogout }) => {
 
   const { customer, machine_statuses, payments, maintenance_logs, farm_stats } = dashboard || {};
 
+  // Check for pending payment this month
+  const currentMonth = new Date().toISOString().slice(0, 7); // e.g., "2026-03"
+  const currentMonthPayment = payments?.find(p => p.month === currentMonth);
+  const hasPendingPayment = currentMonthPayment?.status === "unpaid" || !currentMonthPayment;
+  const isPaid = currentMonthPayment?.status === "paid";
+
   return (
     <div className="min-h-screen bg-[#050505]">
       {/* Header */}
@@ -179,6 +264,46 @@ const CustomerDashboard = ({ session, onLogout }) => {
       </header>
 
       <main className="max-w-6xl mx-auto px-4 py-6 space-y-6">
+        
+        {/* Pending Payment Alert */}
+        {hasPendingPayment && !isPaid && (
+          <div className="bg-gradient-to-r from-red-500/20 to-[#F59E0B]/20 rounded-xl border-2 border-red-500/50 p-6 animate-pulse-slow">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div className="flex items-start gap-4">
+                <div className="p-3 rounded-full bg-red-500/20">
+                  <AlertTriangle className="text-red-500" size={28} />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-white mb-1">Payment Required</h3>
+                  <p className="text-gray-400">
+                    Your hosting fee of <span className="text-[#00E054] font-bold">${customer?.total_fee || 0}</span> is due for {currentMonth}
+                  </p>
+                  <p className="text-sm text-red-400 mt-1">
+                    Pay before the deadline or your machines will go offline
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-col items-end gap-2">
+                <p className="text-xs text-gray-500 uppercase tracking-wide">Deadline: 2nd at 12:00</p>
+                <PaymentCountdown deadline={paymentDeadline} />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Payment Confirmed */}
+        {isPaid && (
+          <div className="bg-gradient-to-r from-[#00E054]/10 to-[#00C2FF]/10 rounded-xl border border-[#00E054]/30 p-4">
+            <div className="flex items-center gap-3">
+              <CheckCircle className="text-[#00E054]" size={24} />
+              <div>
+                <p className="text-white font-medium">Payment Confirmed for {currentMonth}</p>
+                <p className="text-sm text-gray-500">Thank you! Your machines are secured.</p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Farm Stats - The Big Numbers */}
         <div className="bg-gradient-to-br from-[#0F0F0F] to-[#1A1A1A] rounded-2xl border border-[#27272A] p-6">
           <div className="flex items-center gap-2 mb-4">
