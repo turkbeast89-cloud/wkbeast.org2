@@ -113,8 +113,12 @@ const CustomerDashboard = ({ session, onLogout }) => {
         localStorage.setItem("customer_session", JSON.stringify(updatedSession));
       }
       
+      // Build dashboard URL with all customer IDs if available (merged accounts)
+      const allCustomerIds = session.customer.all_customer_ids || [session.customer.id];
+      const dashUrl = `${API}/portal/dashboard/${session.customer.id}?all_ids=${allCustomerIds.join(',')}`;
+      
       const [dashRes, pricesRes] = await Promise.all([
-        fetch(`${API}/portal/dashboard/${session.customer.id}`),
+        fetch(dashUrl),
         fetch(`${API}/portal/crypto-prices`)
       ]);
       

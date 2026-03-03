@@ -724,31 +724,73 @@ async def root():
 
 @api_router.post("/portal/login")
 async def customer_login(username: str, password: str):
-    """Customer login"""
-    account = await db.customer_accounts.find_one({
+    """Customer login - supports multiple customers with same username"""
+    # Find ALL accounts with this username
+    accounts = await db.customer_accounts.find({
         "username": username.lower().strip(),
         "password": password
-    }, {"_id": 0})
+    }, {"_id": 0}).to_list(100)
     
-    if not account:
+    if not accounts:
         raise HTTPException(status_code=401, detail="Invalid username or password")
     
-    customer = await db.customers.find_one({"id": account["customer_id"]}, {"_id": 0})
-    if not customer:
+    # Get ALL customers linked to these accounts
+    customer_ids = [acc["customer_id"] for acc in accounts]
+    customers = await db.customers.find({"id": {"$in": customer_ids}}, {"_id": 0}).to_list(100)
+    
+    if not customers:
         raise HTTPException(status_code=404, detail="Customer not found")
+    
+    # Use the first account's API key for all (they share the same worker)
+    primary_account = accounts[0]
+    
+    # Merge customer data - combine machines, calculate total fee
+    merged_customer = {
+        "id": customer_ids[0],  # Primary ID
+        "all_customer_ids": customer_ids,  # Store all IDs for dashboard
+        "name": customers[0].get("name", ""),
+        "phone": customers[0].get("phone", ""),
+        "status": "active" if any(c.get("status") == "active" for c in customers) else "paused",
+        "machines": [],
+        "total_fee": 0
+    }
+    
+    # Merge machines and fees from all customers
+    for c in customers:
+        merged_customer["machines"].extend(c.get("machines", []))
+        merged_customer["total_fee"] += c.get("total_fee", 0)
     
     return {
         "success": True,
-        "account": account,
-        "customer": customer
+        "account": primary_account,
+        "customer": merged_customer
     }
 
 @api_router.get("/portal/dashboard/{customer_id}")
-async def get_customer_dashboard(customer_id: str):
-    """Get customer dashboard data"""
-    customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
-    if not customer:
+async def get_customer_dashboard(customer_id: str, all_ids: str = ""):
+    """Get customer dashboard data - supports merged accounts"""
+    
+    # Parse all customer IDs (comma-separated) or use single ID
+    customer_ids = [cid.strip() for cid in all_ids.split(",") if cid.strip()] if all_ids else [customer_id]
+    
+    # Fetch all customers
+    customers = await db.customers.find({"id": {"$in": customer_ids}}, {"_id": 0}).to_list(100)
+    if not customers:
         raise HTTPException(status_code=404, detail="Customer not found")
+    
+    # Merge customer data
+    merged_customer = {
+        "id": customer_ids[0],
+        "name": customers[0].get("name", ""),
+        "phone": customers[0].get("phone", ""),
+        "status": "active" if any(c.get("status") == "active" for c in customers) else "paused",
+        "machines": [],
+        "total_fee": 0
+    }
+    
+    for c in customers:
+        merged_customer["machines"].extend(c.get("machines", []))
+        merged_customer["total_fee"] += c.get("total_fee", 0)
     
     # Get machine types with daily profit
     machine_types = await db.machine_types.find({}, {"_id": 0}).to_list(100)
@@ -757,7 +799,7 @@ async def get_customer_dashboard(customer_id: str):
     # Enrich customer machines with daily profit info
     enriched_machines = []
     total_daily_profit = 0
-    for m in customer.get("machines", []):
+    for m in merged_customer.get("machines", []):
         mt = machine_types_map.get(m["machine_type_id"], {})
         daily_profit = mt.get("daily_profit", 0) * m.get("quantity", 1)
         total_daily_profit += daily_profit
@@ -768,14 +810,14 @@ async def get_customer_dashboard(customer_id: str):
             "total_daily_profit": daily_profit
         })
     
-    # Get machine statuses
-    machine_statuses = await db.machine_statuses.find({"customer_id": customer_id}, {"_id": 0}).to_list(100)
+    # Get machine statuses from ALL customers
+    machine_statuses = await db.machine_statuses.find({"customer_id": {"$in": customer_ids}}, {"_id": 0}).to_list(100)
     
-    # Get payments
-    payments = await db.payments.find({"customer_id": customer_id}, {"_id": 0}).to_list(100)
+    # Get payments from ALL customers
+    payments = await db.payments.find({"customer_id": {"$in": customer_ids}}, {"_id": 0}).to_list(100)
     
-    # Get maintenance logs
-    logs = await db.maintenance_logs.find({"customer_id": customer_id}, {"_id": 0}).to_list(100)
+    # Get maintenance logs from ALL customers
+    logs = await db.maintenance_logs.find({"customer_id": {"$in": customer_ids}}, {"_id": 0}).to_list(100)
     
     # Get farm stats with fluctuation
     import random
@@ -788,7 +830,7 @@ async def get_customer_dashboard(customer_id: str):
     farm_stats["machines_offline_display"] = max(0, farm_stats["machines_offline"] + random.randint(-2, 2))
     
     return {
-        "customer": customer,
+        "customer": merged_customer,
         "enriched_machines": enriched_machines,
         "total_daily_profit": total_daily_profit,
         "total_monthly_profit": total_daily_profit * 30,
