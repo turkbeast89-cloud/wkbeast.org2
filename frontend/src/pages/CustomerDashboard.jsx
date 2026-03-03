@@ -348,58 +348,6 @@ const CustomerDashboard = ({ session, onLogout }) => {
           </div>
         </div>
 
-        {/* Your Machines */}
-        <div className="bg-[#0F0F0F] rounded-xl border border-[#27272A] p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <Cpu className="text-[#00E054]" size={20} />
-              <h2 className="text-lg font-bold text-white">Your Machines</h2>
-            </div>
-            <span className="text-sm text-gray-500">
-              {customer?.machines?.reduce((sum, m) => sum + m.quantity, 0) || 0} total
-            </span>
-          </div>
-          
-          <div className="space-y-3">
-            {customer?.machines?.map((machine, idx) => {
-              const status = machine_statuses?.find(s => s.worker_name === machine.machine_name) || {};
-              const isOnline = status.status === "online" || !status.status;
-              
-              return (
-                <div key={idx} className="bg-[#0A0A0A] rounded-lg p-4 border border-[#27272A]">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-3 h-3 rounded-full ${isOnline ? 'bg-[#00E054] animate-pulse' : 'bg-red-500'}`}></div>
-                      <div>
-                        <p className="font-medium text-white">{machine.quantity}x {machine.machine_name}</p>
-                        <p className="text-xs text-gray-500">{isOnline ? 'Online' : 'Offline'}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-6 text-sm">
-                      <div className="flex items-center gap-1 text-gray-400">
-                        <Activity size={14} />
-                        <span>{status.hashrate || "N/A"}</span>
-                      </div>
-                      <div className="flex items-center gap-1 text-gray-400">
-                        <Thermometer size={14} />
-                        <span>{status.temperature || "N/A"}</span>
-                      </div>
-                      <div className="flex items-center gap-1 text-gray-400">
-                        <Clock size={14} />
-                        <span>{status.uptime || "N/A"}</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-            
-            {(!customer?.machines || customer.machines.length === 0) && (
-              <p className="text-center text-gray-500 py-4">No machines registered</p>
-            )}
-          </div>
-        </div>
-
         {/* Live Worker Status from ViaBTC */}
         {workerData?.success && workerData?.workers?.length > 0 && (
           <div className="bg-[#0F0F0F] rounded-xl border border-[#00C2FF]/30 p-6">
