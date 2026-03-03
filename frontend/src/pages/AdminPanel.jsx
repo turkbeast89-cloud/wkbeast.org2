@@ -34,6 +34,12 @@ const AdminPanel = () => {
     fluctuation: 5
   });
   const [maintenanceLogs, setMaintenanceLogs] = useState([]);
+  const [viaBtcSettings, setViaBtcSettings] = useState({
+    access_key: "",
+    secret_key: "",
+    enabled: false
+  });
+  const [showSecretKey, setShowSecretKey] = useState(false);
   const [loading, setLoading] = useState(true);
   
   // Modals
@@ -53,16 +59,22 @@ const AdminPanel = () => {
 
   const fetchData = async () => {
     try {
-      const [accountsRes, customersRes, statsRes, logsRes] = await Promise.all([
+      const [accountsRes, customersRes, statsRes, logsRes, viaBtcRes] = await Promise.all([
         axios.get(`${API}/customer-accounts`),
         axios.get(`${API}/customers`),
         axios.get(`${API}/farm-stats`),
-        axios.get(`${API}/maintenance-logs`)
+        axios.get(`${API}/maintenance-logs`),
+        axios.get(`${API}/viabtc-settings`)
       ]);
       setAccounts(accountsRes.data);
       setCustomers(customersRes.data);
       setFarmStats(statsRes.data);
       setMaintenanceLogs(logsRes.data);
+      setViaBtcSettings({
+        access_key: viaBtcRes.data.access_key || "",
+        secret_key: viaBtcRes.data.secret_key || "",
+        enabled: viaBtcRes.data.enabled || false
+      });
     } catch (e) {
       console.error(e);
     } finally {
@@ -88,6 +100,22 @@ const AdminPanel = () => {
       toast.success("Farm stats updated");
     } catch (e) {
       toast.error("Failed to update stats");
+    }
+  };
+
+  // Save ViaBTC settings
+  const handleSaveViaBtcSettings = async () => {
+    try {
+      await axios.put(`${API}/viabtc-settings`, null, {
+        params: {
+          access_key: viaBtcSettings.access_key,
+          secret_key: viaBtcSettings.secret_key,
+          enabled: viaBtcSettings.enabled
+        }
+      });
+      toast.success("ViaBTC API settings saved");
+    } catch (e) {
+      toast.error("Failed to save ViaBTC settings");
     }
   };
 
@@ -231,6 +259,68 @@ const AdminPanel = () => {
           <Save size={16} className="mr-2" />
           Save Farm Stats
         </Button>
+      </div>
+
+      {/* ViaBTC API Settings */}
+      <div className="card p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <Key className="text-[#F59E0B]" size={20} />
+          <h2 className="text-lg font-bold text-white">ViaBTC API Settings</h2>
+        </div>
+        <p className="text-sm text-gray-500 mb-4">Connect to ViaBTC to fetch live worker status and hashrate for customers</p>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <Label>Access Key</Label>
+            <Input
+              value={viaBtcSettings.access_key}
+              onChange={(e) => setViaBtcSettings({ ...viaBtcSettings, access_key: e.target.value })}
+              className="bg-[#0A0A0A] border-[#27272A] mt-1"
+              placeholder="Enter your ViaBTC Access Key"
+              data-testid="viabtc-access-key"
+            />
+          </div>
+          <div>
+            <Label>Secret Key</Label>
+            <div className="relative">
+              <Input
+                type={showSecretKey ? "text" : "password"}
+                value={viaBtcSettings.secret_key}
+                onChange={(e) => setViaBtcSettings({ ...viaBtcSettings, secret_key: e.target.value })}
+                className="bg-[#0A0A0A] border-[#27272A] mt-1 pr-10"
+                placeholder="Enter your ViaBTC Secret Key"
+                data-testid="viabtc-secret-key"
+              />
+              <button
+                type="button"
+                onClick={() => setShowSecretKey(!showSecretKey)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white"
+              >
+                {showSecretKey ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-4 mt-4">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={viaBtcSettings.enabled}
+              onChange={(e) => setViaBtcSettings({ ...viaBtcSettings, enabled: e.target.checked })}
+              className="w-4 h-4 rounded border-[#27272A] bg-[#0A0A0A] text-[#00E054] focus:ring-[#00E054]"
+            />
+            <span className="text-sm text-gray-400">Enable ViaBTC Integration</span>
+          </label>
+        </div>
+
+        <div className="flex items-center gap-3 mt-4">
+          <Button onClick={handleSaveViaBtcSettings} className="bg-[#F59E0B] text-black" data-testid="save-viabtc-btn">
+            <Save size={16} className="mr-2" />
+            Save API Settings
+          </Button>
+          <p className="text-xs text-gray-500">Get your API keys from <a href="https://www.viabtc.com/tools/api" target="_blank" rel="noopener noreferrer" className="text-[#00C2FF] hover:underline">ViaBTC API Settings</a></p>
+        </div>
       </div>
 
       {/* Customer Accounts */}
