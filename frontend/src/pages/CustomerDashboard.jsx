@@ -130,7 +130,7 @@ const CustomerDashboard = ({ session, onLogout }) => {
       
       if (accountId && hasApiKey) {
         try {
-          const workerRes = await fetch(`${API}/viabtc/customer-workers/${accountId}?coin=LTC`);
+          const workerRes = await fetch(`${API}/viabtc/customer-workers/${accountId}`);
           const workerInfo = await workerRes.json();
           
           if (workerInfo.success && workerInfo.workers?.length > 0) {
@@ -233,9 +233,10 @@ const CustomerDashboard = ({ session, onLogout }) => {
   // Get payment deadline based on payment status
   const paymentDeadline = getPaymentDeadline(hasPendingPayment && !isPaid);
 
-  // Calculate customer's machine stats from ViaBTC workers
-  const customerMachinesOnline = workerData?.active || 0;
-  const customerMachinesTotal = workerData?.total || 0;
+  // Calculate customer's machine stats from ViaBTC workers (excluding invalid)
+  const validWorkers = workerData?.workers?.filter(w => w.worker_status !== "invalid") || [];
+  const customerMachinesOnline = validWorkers.filter(w => w.worker_status === "active").length;
+  const customerMachinesTotal = validWorkers.length;
 
   return (
     <div className="min-h-screen bg-[#050505]">
@@ -380,17 +381,41 @@ const CustomerDashboard = ({ session, onLogout }) => {
                 <span className="text-xs bg-[#00C2FF]/20 text-[#00C2FF] px-2 py-0.5 rounded">ViaBTC</span>
               </div>
               <span className="text-xs text-gray-500">
-                {workerData.active || 0} online / {workerData.total || workerData.workers.length} total
+                {workerData.active || 0} online / {workerData.workers.filter(w => w.worker_status !== "invalid").length} total
               </span>
             </div>
             
             <div className="space-y-3">
-              {workerData.workers.map((worker, idx) => {
+              {workerData.workers
+                .filter(w => w.worker_status !== "invalid") // Hide invalid workers
+                .map((worker, idx) => {
                 const isOnline = worker.worker_status === "active";
-                // Convert hashrate from H/s to GH/s
-                const hashrate1h = (parseInt(worker.hashrate_1hour || 0) / 1000000000).toFixed(2);
-                const hashrate24h = (parseInt(worker.hashrate_24hour || 0) / 1000000000).toFixed(2);
+                // Convert hashrate from H/s to appropriate unit based on coin
+                const coin = worker.coin || "LTC";
+                let hashrate1h, hashrate24h, unit;
+                
+                if (coin === "KAS") {
+                  // Kaspa uses TH/s
+                  hashrate1h = (parseInt(worker.hashrate_1hour || 0) / 1000000000000).toFixed(2);
+                  hashrate24h = (parseInt(worker.hashrate_24hour || 0) / 1000000000000).toFixed(2);
+                  unit = "TH/s";
+                } else {
+                  // LTC, DOGE use GH/s
+                  hashrate1h = (parseInt(worker.hashrate_1hour || 0) / 1000000000).toFixed(2);
+                  hashrate24h = (parseInt(worker.hashrate_24hour || 0) / 1000000000).toFixed(2);
+                  unit = "GH/s";
+                }
+                
                 const rejectRate = (parseFloat(worker.reject_rate || 0) * 100).toFixed(2);
+                
+                // Coin colors
+                const coinColors = {
+                  LTC: "bg-gray-500",
+                  KAS: "bg-green-500",
+                  ZEC: "bg-yellow-500",
+                  BTC: "bg-orange-500",
+                  DOGE: "bg-amber-400"
+                };
                 
                 return (
                   <div key={idx} className="bg-[#0A0A0A] rounded-lg p-4 border border-[#27272A]">
@@ -402,19 +427,24 @@ const CustomerDashboard = ({ session, onLogout }) => {
                           <WifiOff className="text-red-500" size={18} />
                         )}
                         <div>
-                          <p className="font-medium text-white">{worker.worker_name}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium text-white">{worker.worker_name}</p>
+                            <span className={`text-xs px-1.5 py-0.5 rounded ${coinColors[coin] || "bg-gray-500"} text-white font-bold`}>
+                              {coin}
+                            </span>
+                          </div>
                           <p className={`text-xs ${isOnline ? 'text-[#00E054]' : 'text-red-400'}`}>
-                            {isOnline ? 'Online' : worker.worker_status || 'Offline'}
+                            {isOnline ? 'Online' : 'Offline'}
                           </p>
                         </div>
                       </div>
                       <div className="flex items-center gap-4 text-sm">
                         <div className="text-right">
-                          <p className="text-[#00C2FF] font-medium">{hashrate1h} GH/s</p>
+                          <p className="text-[#00C2FF] font-medium">{hashrate1h} {unit}</p>
                           <p className="text-xs text-gray-500">1h avg</p>
                         </div>
                         <div className="text-right">
-                          <p className="text-[#00E054] font-medium">{hashrate24h} GH/s</p>
+                          <p className="text-[#00E054] font-medium">{hashrate24h} {unit}</p>
                           <p className="text-xs text-gray-500">24h avg</p>
                         </div>
                         <div className="text-right">

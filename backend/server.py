@@ -1243,8 +1243,8 @@ async def get_viabtc_workers(coin: str = "LTC"):
         return {"success": False, "error": str(e), "workers": []}
 
 @api_router.get("/viabtc/customer-workers/{customer_account_id}")
-async def get_customer_workers(customer_account_id: str, coin: str = "LTC"):
-    """Fetch workers for a specific customer using their own API key"""
+async def get_customer_workers(customer_account_id: str):
+    """Fetch workers for a specific customer using their own API key - ALL COINS"""
     import aiohttp
     import hashlib
     import hmac
@@ -1269,45 +1269,50 @@ async def get_customer_workers(customer_account_id: str, coin: str = "LTC"):
             return {"success": False, "error": "Secret key not configured", "workers": []}
         customer_secret_key = settings["secret_key"]
     
-    try:
-        tonce = str(int(time.time() * 1000))
-        params = {"coin": coin, "limit": 100, "tonce": tonce}
-        query_string = urlencode(params)
-        
-        signature = hmac.new(
-            customer_secret_key.encode('utf-8'),
-            query_string.encode('utf-8'),
-            hashlib.sha256
-        ).hexdigest()
-        
-        headers = {
-            "X-API-KEY": customer_api_key,
-            "X-SIGNATURE": signature
-        }
-        
-        url = f"https://pool.viabtc.com/res/openapi/v1/hashrate/worker?{query_string}"
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, timeout=15) as resp:
-                data = await resp.json()
+    # Fetch workers for ALL coins
+    coins = ["LTC", "KAS", "ZEC", "BTC", "DOGE"]
+    all_workers = []
+    
+    async with aiohttp.ClientSession() as session:
+        for coin in coins:
+            try:
+                tonce = str(int(time.time() * 1000))
+                params = {"coin": coin, "limit": 100, "tonce": tonce}
+                query_string = urlencode(params)
                 
-                if resp.status == 200 and data.get("code") == 0:
-                    workers = data.get("data", {}).get("data", [])
-                    return {
-                        "success": True,
-                        "workers": workers,
-                        "total": len(workers),
-                        "active": sum(1 for w in workers if w.get("worker_status") == "active"),
-                        "inactive": sum(1 for w in workers if w.get("worker_status") != "active")
-                    }
-                else:
-                    return {
-                        "success": False,
-                        "error": data.get("message", "Unknown error"),
-                        "workers": []
-                    }
-    except Exception as e:
-        return {"success": False, "error": str(e), "workers": []}
+                signature = hmac.new(
+                    customer_secret_key.encode('utf-8'),
+                    query_string.encode('utf-8'),
+                    hashlib.sha256
+                ).hexdigest()
+                
+                headers = {
+                    "X-API-KEY": customer_api_key,
+                    "X-SIGNATURE": signature
+                }
+                
+                url = f"https://pool.viabtc.com/res/openapi/v1/hashrate/worker?{query_string}"
+                
+                async with session.get(url, headers=headers, timeout=15) as resp:
+                    data = await resp.json()
+                    
+                    if resp.status == 200 and data.get("code") == 0:
+                        workers = data.get("data", {}).get("data", [])
+                        # Add coin type to each worker
+                        for w in workers:
+                            w["coin"] = coin
+                        all_workers.extend(workers)
+            except Exception as e:
+                print(f"Error fetching {coin} workers: {e}")
+                continue
+    
+    return {
+        "success": True,
+        "workers": all_workers,
+        "total": len(all_workers),
+        "active": sum(1 for w in all_workers if w.get("worker_status") == "active"),
+        "inactive": sum(1 for w in all_workers if w.get("worker_status") != "active")
+    }
 
 @api_router.get("/viabtc/hashrate")
 async def get_viabtc_hashrate(coin: str = "LTC"):
