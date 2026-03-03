@@ -10,6 +10,9 @@ import {
   ExternalLink, RefreshCw, FileSpreadsheet
 } from "lucide-react";
 
+// Import auth
+import { useAuth, LoginScreen } from "./components/Auth";
+
 // Import pages
 import Dashboard from "./pages/Dashboard";
 import Customers from "./pages/Customers";
@@ -104,18 +107,35 @@ const MobileHeader = ({ setIsOpen }) => (
 
 function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const { isAuthenticated, isLoading, login } = useAuth();
 
   // Initialize default data on first load
   useEffect(() => {
-    const initData = async () => {
-      try {
-        await axios.post(`${API}/init`);
-      } catch (e) {
-        console.error("Init error:", e);
-      }
-    };
-    initData();
-  }, []);
+    if (isAuthenticated) {
+      const initData = async () => {
+        try {
+          await axios.post(`${API}/init`);
+        } catch (e) {
+          console.error("Init error:", e);
+        }
+      };
+      initData();
+    }
+  }, [isAuthenticated]);
+
+  // Show loading while checking auth
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-[#050505] flex items-center justify-center">
+        <div className="w-10 h-10 border-2 border-[#00E054] border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
+  // Show login screen if not authenticated
+  if (!isAuthenticated) {
+    return <LoginScreen onLogin={login} />;
+  }
 
   return (
     <div className="app-container">
