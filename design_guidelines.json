@@ -1,0 +1,123 @@
+{
+  "identity": {
+    "persona": "E1: The Anti-AI Designer",
+    "mission": "Create a high-performance, semi-dark crypto farming dashboard that feels like a command center, not a spreadsheet.",
+    "principles": [
+      "Fusion: Mix Fintech precision with Cyberpunk aesthetics.",
+      "Density: Data is money. High information density without clutter.",
+      "Contrast: Neon accents on deep black backgrounds for readability and vibe."
+    ]
+  },
+  "typography": {
+    "font_family": {
+      "headings": "Chivo, sans-serif",
+      "body": "Manrope, sans-serif",
+      "mono": "JetBrains Mono, monospace"
+    },
+    "weights": {
+      "headings": "700, 900",
+      "body": "400, 500",
+      "bold": "600"
+    },
+    "scale": {
+      "h1": "text-4xl md:text-5xl tracking-tight",
+      "h2": "text-3xl md:text-4xl tracking-tight",
+      "h3": "text-2xl font-bold tracking-tight",
+      "body": "text-base leading-relaxed",
+      "small": "text-sm text-muted-foreground",
+      "mono": "text-xs md:text-sm tracking-wide"
+    }
+  },
+  "colors": {
+    "theme": "dark",
+    "palette": {
+      "background": "#050505",
+      "surface": "#0F0F0F",
+      "surface_highlight": "#1A1A1A",
+      "border": "#27272A",
+      "primary": "#00E054",
+      "secondary": "#7C3AED",
+      "accent": "#00C2FF",
+      "danger": "#EF4444",
+      "warning": "#EAB308",
+      "text_primary": "#FFFFFF",
+      "text_secondary": "#A1A1AA"
+    },
+    "semantic": {
+      "paid": "text-[#00E054] bg-[#00E054]/10 border-[#00E054]/20",
+      "unpaid": "text-[#EF4444] bg-[#EF4444]/10 border-[#EF4444]/20",
+      "paused": "text-[#EAB308] bg-[#EAB308]/10 border-[#EAB308]/20",
+      "offline": "text-[#7C3AED] bg-[#7C3AED]/10 border-[#7C3AED]/20"
+    }
+  },
+  "components": {
+    "buttons": {
+      "default": "rounded-md font-medium transition-all active:scale-95",
+      "primary": "bg-[#00E054] text-black hover:bg-[#00E054]/90 shadow-[0_0_20px_rgba(0,224,84,0.3)] hover:shadow-[0_0_30px_rgba(0,224,84,0.5)]",
+      "ghost": "hover:bg-white/5 text-white"
+    },
+    "cards": {
+      "base": "bg-[#0F0F0F] border border-[#27272A] shadow-sm rounded-xl overflow-hidden",
+      "hover_effect": "hover:border-[#00E054]/50 transition-colors duration-300"
+    },
+    "inputs": {
+      "base": "bg-[#0A0A0A] border-[#27272A] focus:border-[#00E054] focus:ring-1 focus:ring-[#00E054] text-white placeholder:text-gray-600"
+    },
+    "tables": {
+      "header": "bg-[#1A1A1A] text-xs uppercase tracking-wider text-gray-400 font-mono",
+      "row": "border-b border-[#27272A] hover:bg-[#1A1A1A]/50 transition-colors",
+      "cell": "py-3 px-4 text-sm"
+    }
+  },
+  "layouts": {
+    "dashboard_grid": "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4",
+    "bento_grid": "grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4 auto-rows-[minmax(180px,auto)]",
+    "page_container": "max-w-7xl mx-auto p-4 md:p-8 space-y-8",
+    "section_spacing": "space-y-6"
+  },
+  "motion": {
+    "page_transition": {
+      "initial": { "opacity": 0, "y": 20 },
+      "animate": { "opacity": 1, "y": 0 },
+      "exit": { "opacity": 0, "y": -20 },
+      "transition": { "duration": 0.3, "ease": "easeOut" }
+    },
+    "list_item": {
+      "initial": { "opacity": 0, "x": -20 },
+      "animate": { "opacity": 1, "x": 0 }
+    }
+  },
+  "visual_enhancers": {
+    "glassmorphism": "backdrop-blur-xl bg-black/60 border border-white/10",
+    "neon_glow": "shadow-[0_0_15px_rgba(var(--color),0.5)]",
+    "grid_background": "bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px]"
+  },
+  "assets": {
+    "icons": "lucide-react",
+    "image_style": "High contrast, dark cinematic, neon accents",
+    "search_queries": [
+      "crypto mining farm server rack dark neon",
+      "abstract blockchain network glowing",
+      "bitcoin hardware wallet dark background"
+    ]
+  },
+  "accessibility": {
+    "contrast_check": "Ensure text-gray-400 or darker is not used on black backgrounds without checking APCA.",
+    "focus_states": "Focus rings must be visible and use the primary neon color."
+  },
+  "instructions_to_main_agent": [
+    "Use 'sonner' for all notifications.",
+    "Implement 'recharts' for the profit dashboard using the custom neon palette.",
+    "Use 'xlsx' library for Excel import/export.",
+    "Create a 'WhatsAppBulkSender' component that handles the loop and opens tabs with delays.",
+    "Ensure the 'Payments' grid handles horizontal scrolling on mobile.",
+    "Do not use gradients for backgrounds, use solid dark colors with subtle noise or grid patterns.",
+    "Every interactive element must have a hover state.",
+    "Add 'data-testid' to all buttons and inputs."
+  ],
+  "UNIVERSAL_GUIDELINES": {
+    "do_not_use": ["gradients on text", "default blue links", "rounded-full buttons (unless icon only)"],
+    "must_use": ["micro-interactions", "loading skeletons", "empty states with illustrations"],
+    "component_path": "/app/frontend/src/components/ui"
+  }
+}
