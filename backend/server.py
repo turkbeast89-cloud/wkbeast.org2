@@ -1078,6 +1078,105 @@ async def test_viabtc_connection():
 
 # ==================== VIABTC WORKERS DATA ====================
 
+@api_router.get("/viabtc/subaccounts")
+async def get_viabtc_subaccounts():
+    """Fetch all sub-accounts from ViaBTC API with their API keys"""
+    import aiohttp
+    import hashlib
+    import hmac
+    import time
+    from urllib.parse import urlencode
+    
+    settings = await db.viabtc_settings.find_one({"id": "viabtc_settings"}, {"_id": 0})
+    if not settings or not settings.get("enabled"):
+        return {"success": False, "error": "ViaBTC integration not enabled", "subaccounts": []}
+    
+    if not settings.get("access_key") or not settings.get("secret_key"):
+        return {"success": False, "error": "API keys not configured", "subaccounts": []}
+    
+    access_key = settings["access_key"]
+    secret_key = settings["secret_key"]
+    
+    try:
+        tonce = str(int(time.time() * 1000))
+        params = {"tonce": tonce, "limit": 100}
+        query_string = urlencode(params)
+        
+        signature = hmac.new(
+            secret_key.encode('utf-8'),
+            query_string.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+        
+        headers = {
+            "X-API-KEY": access_key,
+            "X-SIGNATURE": signature
+        }
+        
+        url = f"https://pool.viabtc.com/res/openapi/v1/account/sub?{query_string}"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, timeout=15) as resp:
+                data = await resp.json()
+                
+                if resp.status == 200 and data.get("code") == 0:
+                    return {
+                        "success": True,
+                        "subaccounts": data.get("data", []),
+                        "total": data.get("total", 0)
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error": data.get("message", "Unknown error"),
+                        "subaccounts": []
+                    }
+    except Exception as e:
+        return {"success": False, "error": str(e), "subaccounts": []}
+
+@api_router.post("/viabtc/sync-accounts")
+async def sync_viabtc_accounts():
+    """Sync ViaBTC sub-accounts with customer accounts"""
+    # Get all sub-accounts from ViaBTC
+    subaccounts_res = await get_viabtc_subaccounts()
+    if not subaccounts_res.get("success"):
+        return subaccounts_res
+    
+    # Handle nested data structure
+    subaccounts_data = subaccounts_res.get("subaccounts", {})
+    subaccounts = subaccounts_data.get("data", []) if isinstance(subaccounts_data, dict) else subaccounts_data
+    
+    # Get all customer accounts
+    customer_accounts = await db.customer_accounts.find({}, {"_id": 0}).to_list(1000)
+    
+    # Create a map of worker_name -> customer_account
+    account_map = {acc.get("worker_name", "").lower(): acc for acc in customer_accounts}
+    
+    updated = []
+    not_found = []
+    
+    for sub in subaccounts:
+        sub_name = sub.get("account", "").lower()
+        api_key = sub.get("api_key", "")
+        secret_key = sub.get("secret_key", "")
+        
+        if sub_name in account_map:
+            # Update the customer account with the API key and secret key
+            await db.customer_accounts.update_one(
+                {"id": account_map[sub_name]["id"]},
+                {"$set": {"viabtc_api_key": api_key, "viabtc_secret_key": secret_key}}
+            )
+            updated.append(sub_name)
+        else:
+            not_found.append(sub_name)
+    
+    return {
+        "success": True,
+        "updated": updated,
+        "not_found": not_found,
+        "message": f"Synced {len(updated)} accounts. {len(not_found)} sub-accounts not matched to customers."
+    }
+
 @api_router.get("/viabtc/workers")
 async def get_viabtc_workers(coin: str = "LTC"):
     """Fetch workers data from ViaBTC API"""
@@ -1126,6 +1225,73 @@ async def get_viabtc_workers(coin: str = "LTC"):
                         "success": True,
                         "workers": workers,
                         "total": data.get("data", {}).get("total", len(workers)),
+                        "active": sum(1 for w in workers if w.get("worker_status") == "active"),
+                        "inactive": sum(1 for w in workers if w.get("worker_status") != "active")
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error": data.get("message", "Unknown error"),
+                        "workers": []
+                    }
+    except Exception as e:
+        return {"success": False, "error": str(e), "workers": []}
+
+@api_router.get("/viabtc/customer-workers/{customer_account_id}")
+async def get_customer_workers(customer_account_id: str, coin: str = "LTC"):
+    """Fetch workers for a specific customer using their own API key"""
+    import aiohttp
+    import hashlib
+    import hmac
+    import time
+    from urllib.parse import urlencode
+    
+    # Get customer account with their API key
+    customer_account = await db.customer_accounts.find_one({"id": customer_account_id}, {"_id": 0})
+    if not customer_account:
+        return {"success": False, "error": "Customer account not found", "workers": []}
+    
+    customer_api_key = customer_account.get("viabtc_api_key")
+    if not customer_api_key:
+        return {"success": False, "error": "Customer API key not set", "workers": []}
+    
+    # Use customer's own secret key if available, otherwise fall back to main
+    customer_secret_key = customer_account.get("viabtc_secret_key")
+    if not customer_secret_key:
+        # Fall back to main settings for secret key
+        settings = await db.viabtc_settings.find_one({"id": "viabtc_settings"}, {"_id": 0})
+        if not settings or not settings.get("secret_key"):
+            return {"success": False, "error": "Secret key not configured", "workers": []}
+        customer_secret_key = settings["secret_key"]
+    
+    try:
+        tonce = str(int(time.time() * 1000))
+        params = {"coin": coin, "limit": 100, "tonce": tonce}
+        query_string = urlencode(params)
+        
+        signature = hmac.new(
+            customer_secret_key.encode('utf-8'),
+            query_string.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+        
+        headers = {
+            "X-API-KEY": customer_api_key,
+            "X-SIGNATURE": signature
+        }
+        
+        url = f"https://pool.viabtc.com/res/openapi/v1/hashrate/worker?{query_string}"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, timeout=15) as resp:
+                data = await resp.json()
+                
+                if resp.status == 200 and data.get("code") == 0:
+                    workers = data.get("data", {}).get("data", [])
+                    return {
+                        "success": True,
+                        "workers": workers,
+                        "total": len(workers),
                         "active": sum(1 for w in workers if w.get("worker_status") == "active"),
                         "inactive": sum(1 for w in workers if w.get("worker_status") != "active")
                     }

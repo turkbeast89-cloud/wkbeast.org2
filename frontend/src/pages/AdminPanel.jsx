@@ -195,6 +195,25 @@ const AdminPanel = () => {
     }
   };
 
+  // Sync ViaBTC API Keys
+  const handleSyncViaBtcAccounts = async () => {
+    try {
+      toast.info("Syncing ViaBTC sub-accounts...");
+      const res = await axios.post(`${API}/viabtc/sync-accounts`);
+      if (res.data.success) {
+        toast.success(`Synced ${res.data.updated.length} accounts`);
+        if (res.data.not_found.length > 0) {
+          toast.info(`${res.data.not_found.length} ViaBTC accounts not matched: ${res.data.not_found.slice(0, 5).join(", ")}...`);
+        }
+        fetchData();
+      } else {
+        toast.error(res.data.error || "Failed to sync");
+      }
+    } catch (e) {
+      toast.error("Failed to sync ViaBTC accounts");
+    }
+  };
+
   const handleDeleteLog = async (log) => {
     try {
       await axios.delete(`${API}/maintenance-logs/${log.id}`);
@@ -416,11 +435,15 @@ const AdminPanel = () => {
             <h2 className="text-lg font-bold text-white">Customer Accounts</h2>
           </div>
           <div className="flex gap-2">
+            <Button onClick={handleSyncViaBtcAccounts} variant="outline" className="border-[#F59E0B] text-[#F59E0B]" data-testid="sync-viabtc-btn">
+              <RefreshCw size={16} className="mr-2" />
+              Sync ViaBTC API Keys
+            </Button>
             <Button onClick={handleAutoCreateAccounts} variant="outline" className="border-[#27272A]" data-testid="auto-create-btn">
               <RefreshCw size={16} className="mr-2" />
               Auto-Create All
             </Button>
-            <Button onClick={() => { setEditingAccount(null); setAccountForm({ customer_id: "", username: "", password: "", worker_name: "" }); setShowAccountModal(true); }} className="bg-[#00E054] text-black" data-testid="add-account-btn">
+            <Button onClick={() => { setEditingAccount(null); setAccountForm({ customer_id: "", username: "", password: "", worker_name: "", viabtc_api_key: "" }); setShowAccountModal(true); }} className="bg-[#00E054] text-black" data-testid="add-account-btn">
               <Plus size={16} className="mr-2" />
               Add Account
             </Button>
@@ -435,6 +458,7 @@ const AdminPanel = () => {
                 <th className="text-left py-3 px-4">Username</th>
                 <th className="text-left py-3 px-4">Password</th>
                 <th className="text-left py-3 px-4">Worker Name (ViaBTC)</th>
+                <th className="text-left py-3 px-4">API Key</th>
                 <th className="text-right py-3 px-4">Actions</th>
               </tr>
             </thead>
@@ -445,6 +469,13 @@ const AdminPanel = () => {
                   <td className="py-3 px-4 text-gray-400">{account.username}</td>
                   <td className="py-3 px-4 font-mono text-gray-400">{account.password}</td>
                   <td className="py-3 px-4 text-[#00C2FF] font-mono">{account.worker_name || <span className="text-red-400">Not set</span>}</td>
+                  <td className="py-3 px-4 font-mono text-xs">
+                    {account.viabtc_api_key ? (
+                      <span className="text-[#00E054]">{account.viabtc_api_key.substring(0, 8)}...</span>
+                    ) : (
+                      <span className="text-red-400">Not set</span>
+                    )}
+                  </td>
                   <td className="py-3 px-4 text-right">
                     <Button size="icon" variant="ghost" onClick={() => { 
                       setEditingAccount(account); 
@@ -467,7 +498,7 @@ const AdminPanel = () => {
               ))}
               {accounts.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="py-8 text-center text-gray-500">
+                  <td colSpan={6} className="py-8 text-center text-gray-500">
                     No accounts yet. Click "Auto-Create All" to generate accounts for all customers.
                   </td>
                 </tr>
@@ -476,7 +507,7 @@ const AdminPanel = () => {
           </table>
         </div>
         <p className="text-xs text-gray-500 mt-3">
-          Set the <span className="text-[#00C2FF]">Worker Name</span> to match the customer's ViaBTC worker name exactly
+          Click <span className="text-[#F59E0B]">"Sync ViaBTC API Keys"</span> to auto-fetch API keys for accounts where Worker Name matches a ViaBTC sub-account
         </p>
       </div>
 
