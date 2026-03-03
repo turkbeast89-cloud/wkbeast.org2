@@ -492,7 +492,7 @@ const Customers = () => {
 
       {/* Add/Edit Customer Modal */}
       <Dialog open={showModal} onOpenChange={setShowModal}>
-        <DialogContent className="bg-[#0F0F0F] border-[#27272A] text-white max-w-lg">
+        <DialogContent className="bg-[#0F0F0F] border-[#27272A] text-white max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {editingCustomer ? "Edit Customer" : "Add Customer"}
