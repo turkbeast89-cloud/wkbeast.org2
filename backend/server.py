@@ -1074,6 +1074,181 @@ async def test_viabtc_connection():
             "message": f"Error testing connection: {str(e)}"
         }
 
+# ==================== VIABTC WORKERS DATA ====================
+
+@api_router.get("/viabtc/workers")
+async def get_viabtc_workers(coin: str = "LTC"):
+    """Fetch workers data from ViaBTC API"""
+    import aiohttp
+    import hashlib
+    import hmac
+    import time
+    from urllib.parse import urlencode
+    
+    settings = await db.viabtc_settings.find_one({"id": "viabtc_settings"}, {"_id": 0})
+    if not settings or not settings.get("enabled"):
+        return {"success": False, "error": "ViaBTC integration not enabled", "workers": []}
+    
+    if not settings.get("access_key") or not settings.get("secret_key"):
+        return {"success": False, "error": "API keys not configured", "workers": []}
+    
+    access_key = settings["access_key"]
+    secret_key = settings["secret_key"]
+    
+    try:
+        tonce = str(int(time.time() * 1000))
+        params = {"coin": coin, "limit": 100, "tonce": tonce}
+        query_string = urlencode(params)
+        
+        signature = hmac.new(
+            secret_key.encode('utf-8'),
+            query_string.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+        
+        headers = {
+            "X-API-KEY": access_key,
+            "X-SIGNATURE": signature
+        }
+        
+        # Get workers list using the correct endpoint
+        url = f"https://pool.viabtc.com/res/openapi/v1/hashrate/worker?{query_string}"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, timeout=15) as resp:
+                data = await resp.json()
+                
+                if resp.status == 200 and data.get("code") == 0:
+                    workers = data.get("data", {}).get("data", [])
+                    return {
+                        "success": True,
+                        "workers": workers,
+                        "total": data.get("data", {}).get("total", len(workers)),
+                        "active": sum(1 for w in workers if w.get("worker_status") == "active"),
+                        "inactive": sum(1 for w in workers if w.get("worker_status") != "active")
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error": data.get("message", "Unknown error"),
+                        "workers": []
+                    }
+    except Exception as e:
+        return {"success": False, "error": str(e), "workers": []}
+
+@api_router.get("/viabtc/hashrate")
+async def get_viabtc_hashrate(coin: str = "LTC"):
+    """Fetch hashrate data from ViaBTC API"""
+    import aiohttp
+    import hashlib
+    import hmac
+    import time
+    from urllib.parse import urlencode
+    
+    settings = await db.viabtc_settings.find_one({"id": "viabtc_settings"}, {"_id": 0})
+    if not settings or not settings.get("enabled"):
+        return {"success": False, "error": "ViaBTC integration not enabled"}
+    
+    if not settings.get("access_key") or not settings.get("secret_key"):
+        return {"success": False, "error": "API keys not configured"}
+    
+    access_key = settings["access_key"]
+    secret_key = settings["secret_key"]
+    
+    try:
+        tonce = str(int(time.time() * 1000))
+        params = {"coin": coin, "tonce": tonce}
+        query_string = urlencode(params)
+        
+        signature = hmac.new(
+            secret_key.encode('utf-8'),
+            query_string.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+        
+        headers = {
+            "X-API-KEY": access_key,
+            "X-SIGNATURE": signature
+        }
+        
+        url = f"https://pool.viabtc.com/res/openapi/v1/hashrate?{query_string}"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, timeout=15) as resp:
+                data = await resp.json()
+                
+                if resp.status == 200 and data.get("code") == 0:
+                    return {
+                        "success": True,
+                        "data": data.get("data", {})
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error": data.get("message", "Unknown error")
+                    }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@api_router.get("/portal/worker-status/{worker_name}")
+async def get_worker_status(worker_name: str, coin: str = "LTC"):
+    """Get specific worker status from ViaBTC"""
+    import aiohttp
+    import hashlib
+    import hmac
+    import time
+    from urllib.parse import urlencode
+    
+    settings = await db.viabtc_settings.find_one({"id": "viabtc_settings"}, {"_id": 0})
+    if not settings or not settings.get("enabled"):
+        return {"success": False, "error": "ViaBTC not enabled", "worker": None}
+    
+    if not settings.get("access_key") or not settings.get("secret_key"):
+        return {"success": False, "error": "API keys not configured", "worker": None}
+    
+    access_key = settings["access_key"]
+    secret_key = settings["secret_key"]
+    
+    try:
+        tonce = str(int(time.time() * 1000))
+        params = {"coin": coin, "limit": 100, "tonce": tonce}
+        query_string = urlencode(params)
+        
+        signature = hmac.new(
+            secret_key.encode('utf-8'),
+            query_string.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+        
+        headers = {
+            "X-API-KEY": access_key,
+            "X-SIGNATURE": signature
+        }
+        
+        url = f"https://pool.viabtc.com/res/openapi/v1/hashrate/worker?{query_string}"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, timeout=15) as resp:
+                data = await resp.json()
+                
+                if resp.status == 200 and data.get("code") == 0:
+                    workers = data.get("data", {}).get("data", [])
+                    # Find the specific worker (case-insensitive partial match)
+                    worker = next((w for w in workers if worker_name.lower() in w.get("worker_name", "").lower()), None)
+                    return {
+                        "success": True,
+                        "worker": worker,
+                        "all_workers": workers
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error": data.get("message", "Unknown error"),
+                        "worker": None
+                    }
+    except Exception as e:
+        return {"success": False, "error": str(e), "worker": None}
+
 # ==================== AUTO-CREATE CUSTOMER ACCOUNTS ====================
 
 @api_router.post("/auto-create-accounts")
