@@ -1189,6 +1189,11 @@ async def get_viabtc_subaccounts():
 @api_router.post("/viabtc/sync-accounts")
 async def sync_viabtc_accounts():
     """Sync ViaBTC sub-accounts with customer accounts - updates username, worker_name, and API keys"""
+    # Get main API settings first
+    main_settings = await db.viabtc_settings.find_one({"id": "viabtc_settings"}, {"_id": 0})
+    main_access_key = main_settings.get("access_key", "") if main_settings else ""
+    main_secret_key = main_settings.get("secret_key", "") if main_settings else ""
+    
     # Get all sub-accounts from ViaBTC
     subaccounts_res = await get_viabtc_subaccounts()
     if not subaccounts_res.get("success"):
@@ -1207,10 +1212,28 @@ async def sync_viabtc_accounts():
     updated = []
     not_found = []
     
+    # First, check for main account (turkbeast) - give it the main API key
+    main_account_name = "turkbeast"
+    if main_account_name in account_map and main_access_key:
+        await db.customer_accounts.update_one(
+            {"id": account_map[main_account_name]["id"]},
+            {"$set": {
+                "username": main_account_name,
+                "worker_name": main_account_name,
+                "viabtc_api_key": main_access_key,
+                "viabtc_secret_key": main_secret_key
+            }}
+        )
+        updated.append(f"{main_account_name} (main)")
+    
     for sub in subaccounts:
         sub_name = sub.get("account", "").lower()
         api_key = sub.get("api_key", "")
         secret_key = sub.get("secret_key", "")
+        
+        # Skip if this is the main account (already handled above)
+        if sub_name == main_account_name:
+            continue
         
         if sub_name in account_map:
             # Update the customer account - username = worker_name = sub_account name
