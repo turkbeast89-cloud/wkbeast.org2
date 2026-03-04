@@ -1128,6 +1128,77 @@ async def test_viabtc_connection():
             "message": f"Error testing connection: {str(e)}"
         }
 
+@api_router.get("/viabtc/earnings/{coin}")
+async def get_viabtc_earnings(coin: str = "LTC"):
+    """Fetch earnings/profit data from ViaBTC API"""
+    import aiohttp
+    import hashlib
+    import hmac
+    import time
+    from urllib.parse import urlencode
+    
+    settings = await db.viabtc_settings.find_one({"id": "viabtc_settings"}, {"_id": 0})
+    if not settings or not settings.get("enabled"):
+        return {"success": False, "error": "ViaBTC integration not enabled"}
+    
+    access_key = settings.get("access_key", "")
+    secret_key = settings.get("secret_key", "")
+    
+    if not access_key or not secret_key:
+        return {"success": False, "error": "API keys not configured"}
+    
+    try:
+        tonce = str(int(time.time() * 1000))
+        
+        # Try profit endpoint
+        params = {"coin": coin.upper(), "tonce": tonce}
+        query_string = urlencode(params)
+        
+        signature = hmac.new(
+            secret_key.encode('utf-8'),
+            query_string.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+        
+        headers = {
+            "X-API-KEY": access_key,
+            "X-SIGNATURE": signature
+        }
+        
+        # Test multiple possible endpoints
+        endpoints = [
+            f"https://pool.viabtc.com/res/openapi/v1/profit?{query_string}",
+            f"https://pool.viabtc.com/res/openapi/v1/revenue?{query_string}",
+            f"https://pool.viabtc.com/res/openapi/v1/earnings?{query_string}",
+            f"https://pool.viabtc.com/res/openapi/v1/account/profit?{query_string}",
+        ]
+        
+        results = {}
+        async with aiohttp.ClientSession() as session:
+            for url in endpoints:
+                try:
+                    async with session.get(url, headers=headers, timeout=10) as resp:
+                        data = await resp.json()
+                        endpoint_name = url.split("/v1/")[1].split("?")[0]
+                        results[endpoint_name] = {
+                            "status": resp.status,
+                            "code": data.get("code"),
+                            "message": data.get("message"),
+                            "data": data.get("data") if data.get("code") == 0 else None
+                        }
+                except Exception as e:
+                    endpoint_name = url.split("/v1/")[1].split("?")[0]
+                    results[endpoint_name] = {"error": str(e)}
+        
+        return {
+            "success": True,
+            "coin": coin,
+            "endpoints_tested": results
+        }
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 # ==================== VIABTC WORKERS DATA ====================
 
 @api_router.get("/viabtc/subaccounts")
