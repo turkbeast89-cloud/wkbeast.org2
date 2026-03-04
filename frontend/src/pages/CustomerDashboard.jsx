@@ -624,53 +624,91 @@ const CustomerDashboard = ({ session, onLogout }) => {
               <span className="text-xs bg-[#F59E0B]/20 text-[#F59E0B] px-2 py-0.5 rounded">Live from ViaBTC</span>
             </div>
             
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-              {Object.entries(earningsData).map(([coin, data]) => {
-                if (data.error || parseFloat(data.total_profit || 0) === 0) return null;
-                
+            {/* Main coins with total mined */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              {Object.entries(earningsData).filter(([coin, data]) => !data.merged_mining && parseFloat(data.total_profit || 0) > 0).map(([coin, data]) => {
                 const coinColors = {
-                  LTC: { bg: "bg-gray-600/30", text: "text-gray-200", border: "border-gray-500/40", icon: "💎" },
-                  KAS: { bg: "bg-teal-600/30", text: "text-teal-300", border: "border-teal-500/40", icon: "🟢" },
-                  DOGE: { bg: "bg-yellow-600/30", text: "text-yellow-300", border: "border-yellow-500/40", icon: "🐕" },
-                  BTC: { bg: "bg-orange-600/30", text: "text-orange-300", border: "border-orange-500/40", icon: "₿" },
-                  BELLS: { bg: "bg-purple-600/30", text: "text-purple-300", border: "border-purple-500/40", icon: "🔔" },
-                  PEP: { bg: "bg-green-600/30", text: "text-green-300", border: "border-green-500/40", icon: "🐸" },
-                  SHIC: { bg: "bg-red-600/30", text: "text-red-300", border: "border-red-500/40", icon: "🐕" },
-                  DINGO: { bg: "bg-amber-600/30", text: "text-amber-300", border: "border-amber-500/40", icon: "🦊" },
-                  JKC: { bg: "bg-blue-600/30", text: "text-blue-300", border: "border-blue-500/40", icon: "🪙" },
-                  LKY: { bg: "bg-pink-600/30", text: "text-pink-300", border: "border-pink-500/40", icon: "🍀" },
+                  LTC: { bg: "bg-gradient-to-br from-gray-700/50 to-gray-800/50", text: "text-gray-100", border: "border-gray-500/40", icon: "💎" },
+                  KAS: { bg: "bg-gradient-to-br from-teal-700/50 to-teal-800/50", text: "text-teal-200", border: "border-teal-500/40", icon: "🟢" },
+                  BTC: { bg: "bg-gradient-to-br from-orange-700/50 to-orange-800/50", text: "text-orange-200", border: "border-orange-500/40", icon: "₿" },
                 };
-                const colors = coinColors[coin] || { bg: "bg-slate-600/30", text: "text-slate-300", border: "border-slate-500/40", icon: "🪙" };
-                const isMerged = data.merged_mining;
+                const colors = coinColors[coin] || { bg: "bg-gradient-to-br from-slate-700/50 to-slate-800/50", text: "text-slate-200", border: "border-slate-500/40", icon: "🪙" };
                 
                 return (
-                  <div key={coin} className={`${colors.bg} rounded-lg p-3 border ${colors.border}`}>
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="text-base">{colors.icon}</span>
-                      <span className={`text-xs font-bold ${colors.text} uppercase`}>{coin}</span>
-                      {isMerged && <span className="text-[8px] bg-white/10 px-1 rounded">Merged</span>}
-                    </div>
-                    <div className={`font-bold text-lg ${colors.text}`}>
-                      {parseFloat(data.total_profit || 0).toLocaleString(undefined, {maximumFractionDigits: 4})}
-                    </div>
-                    {data.balance && parseFloat(data.balance) > 0 && !isMerged && (
-                      <div className="text-xs text-gray-400 mt-1">
-                        Balance: {parseFloat(data.balance).toFixed(4)}
+                  <div key={coin} className={`${colors.bg} rounded-xl p-4 border ${colors.border}`}>
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">{colors.icon}</span>
+                        <span className={`text-lg font-bold ${colors.text}`}>{coin}</span>
                       </div>
-                    )}
-                    {data.pps_profit && parseFloat(data.pps_profit) > 0 && (
-                      <div className="text-[10px] text-gray-500 mt-1">
-                        PPS: {parseFloat(data.pps_profit).toFixed(2)} | PPLNS: {parseFloat(data.pplns_profit || 0).toFixed(2)}
+                    </div>
+                    <div className="space-y-3">
+                      <div>
+                        <div className="text-xs text-gray-400 mb-1">Total Mined (All Time)</div>
+                        <div className={`font-bold text-2xl ${colors.text}`}>
+                          {parseFloat(data.total_profit || 0).toLocaleString(undefined, {maximumFractionDigits: 4})} <span className="text-sm opacity-70">{coin}</span>
+                        </div>
+                        {data.pps_profit && (
+                          <div className="text-xs text-gray-500 mt-1">
+                            PPS: {parseFloat(data.pps_profit).toFixed(2)} • PPLNS: {parseFloat(data.pplns_profit || 0).toFixed(2)}
+                          </div>
+                        )}
                       </div>
-                    )}
+                      {data.balance && parseFloat(data.balance) > 0 && (
+                        <div className="pt-3 border-t border-white/10">
+                          <div className="text-xs text-[#F59E0B] mb-1">Available Balance (Not Withdrawn)</div>
+                          <div className="font-semibold text-lg text-[#F59E0B]">
+                            {parseFloat(data.balance).toLocaleString(undefined, {maximumFractionDigits: 4})} <span className="text-sm opacity-70">{coin}</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 );
               })}
             </div>
             
+            {/* Merged mining coins - Available balance only */}
+            {Object.entries(earningsData).some(([coin, data]) => data.merged_mining && parseFloat(data.total_profit || 0) > 0) && (
+              <>
+                <div className="flex items-center gap-2 mb-3 mt-6">
+                  <div className="h-px flex-1 bg-[#27272A]"></div>
+                  <span className="text-xs text-gray-500 uppercase tracking-wider">Merged Mining Balance</span>
+                  <div className="h-px flex-1 bg-[#27272A]"></div>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
+                  {Object.entries(earningsData).filter(([coin, data]) => data.merged_mining && parseFloat(data.total_profit || 0) > 0).map(([coin, data]) => {
+                    const coinColors = {
+                      DOGE: { bg: "bg-yellow-900/30", text: "text-yellow-300", icon: "🐕" },
+                      BELLS: { bg: "bg-purple-900/30", text: "text-purple-300", icon: "🔔" },
+                      PEP: { bg: "bg-green-900/30", text: "text-green-300", icon: "🐸" },
+                      SHIC: { bg: "bg-red-900/30", text: "text-red-300", icon: "🐕" },
+                      DINGO: { bg: "bg-amber-900/30", text: "text-amber-300", icon: "🦊" },
+                      JKC: { bg: "bg-blue-900/30", text: "text-blue-300", icon: "🪙" },
+                      LKY: { bg: "bg-pink-900/30", text: "text-pink-300", icon: "🍀" },
+                    };
+                    const colors = coinColors[coin] || { bg: "bg-slate-900/30", text: "text-slate-300", icon: "🪙" };
+                    
+                    return (
+                      <div key={coin} className={`${colors.bg} rounded-lg p-3 border border-white/5`}>
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <span className="text-sm">{colors.icon}</span>
+                          <span className={`text-xs font-semibold ${colors.text}`}>{coin}</span>
+                        </div>
+                        <div className={`font-bold text-base ${colors.text}`}>
+                          {parseFloat(data.total_profit || 0).toLocaleString(undefined, {maximumFractionDigits: 2})}
+                        </div>
+                        <div className="text-[10px] text-gray-500">available</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+            
             <div className="mt-4 pt-4 border-t border-[#27272A] flex items-center justify-center gap-2">
               <div className="w-2 h-2 rounded-full bg-[#F59E0B] animate-pulse"></div>
-              <span className="text-xs text-gray-500">Real earnings from ViaBTC Pool • Merged mining included</span>
+              <span className="text-xs text-gray-500">Real-time data from ViaBTC Pool</span>
             </div>
           </div>
         )}
