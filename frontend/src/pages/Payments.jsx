@@ -24,6 +24,7 @@ const Payments = () => {
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
   const [generating, setGenerating] = useState(false);
+  const [statusFilter, setStatusFilter] = useState(null); // null = all, 'paid', 'unpaid', 'paused'
 
   useEffect(() => {
     fetchData();
@@ -173,9 +174,13 @@ const Payments = () => {
         </div>
       </div>
 
-      {/* Stats */}
+      {/* Stats - Clickable Filters */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="stat-card">
+        <div 
+          className={`stat-card cursor-pointer transition-all hover:scale-[1.02] ${statusFilter === null ? 'ring-2 ring-[#7C3AED]' : 'opacity-70 hover:opacity-100'}`}
+          onClick={() => setStatusFilter(null)}
+          data-testid="filter-all"
+        >
           <div className="flex items-center gap-3">
             <div className="p-3 rounded-lg bg-[#7C3AED]/10">
               <DollarSign className="text-[#7C3AED]" size={24} />
@@ -185,8 +190,13 @@ const Payments = () => {
               <p className="text-xl font-bold text-white">${stats.total.toLocaleString()}</p>
             </div>
           </div>
+          {statusFilter === null && <div className="absolute top-2 right-2 w-2 h-2 bg-[#7C3AED] rounded-full"></div>}
         </div>
-        <div className="stat-card">
+        <div 
+          className={`stat-card cursor-pointer transition-all hover:scale-[1.02] ${statusFilter === 'paid' ? 'ring-2 ring-[#00E054]' : 'opacity-70 hover:opacity-100'}`}
+          onClick={() => setStatusFilter(statusFilter === 'paid' ? null : 'paid')}
+          data-testid="filter-paid"
+        >
           <div className="flex items-center gap-3">
             <div className="p-3 rounded-lg bg-[#00E054]/10">
               <Check className="text-[#00E054]" size={24} />
@@ -196,8 +206,13 @@ const Payments = () => {
               <p className="text-xl font-bold text-[#00E054]">${stats.paid.toLocaleString()}</p>
             </div>
           </div>
+          {statusFilter === 'paid' && <div className="absolute top-2 right-2 w-2 h-2 bg-[#00E054] rounded-full"></div>}
         </div>
-        <div className="stat-card">
+        <div 
+          className={`stat-card cursor-pointer transition-all hover:scale-[1.02] ${statusFilter === 'unpaid' ? 'ring-2 ring-[#EF4444]' : 'opacity-70 hover:opacity-100'}`}
+          onClick={() => setStatusFilter(statusFilter === 'unpaid' ? null : 'unpaid')}
+          data-testid="filter-unpaid"
+        >
           <div className="flex items-center gap-3">
             <div className="p-3 rounded-lg bg-[#EF4444]/10">
               <AlertCircle className="text-[#EF4444]" size={24} />
@@ -207,8 +222,13 @@ const Payments = () => {
               <p className="text-xl font-bold text-[#EF4444]">${stats.unpaid.toLocaleString()}</p>
             </div>
           </div>
+          {statusFilter === 'unpaid' && <div className="absolute top-2 right-2 w-2 h-2 bg-[#EF4444] rounded-full"></div>}
         </div>
-        <div className="stat-card">
+        <div 
+          className={`stat-card cursor-pointer transition-all hover:scale-[1.02] ${statusFilter === 'paused' ? 'ring-2 ring-[#EAB308]' : 'opacity-70 hover:opacity-100'}`}
+          onClick={() => setStatusFilter(statusFilter === 'paused' ? null : 'paused')}
+          data-testid="filter-paused"
+        >
           <div className="flex items-center gap-3">
             <div className="p-3 rounded-lg bg-[#EAB308]/10">
               <Pause className="text-[#EAB308]" size={24} />
@@ -218,11 +238,32 @@ const Payments = () => {
               <p className="text-xl font-bold text-[#EAB308]">${stats.paused.toLocaleString()}</p>
             </div>
           </div>
+          {statusFilter === 'paused' && <div className="absolute top-2 right-2 w-2 h-2 bg-[#EAB308] rounded-full"></div>}
         </div>
       </div>
 
       {/* Payments Table */}
       <div className="card overflow-hidden">
+        {statusFilter && (
+          <div className="px-4 py-2 bg-[#1A1A1A] border-b border-[#27272A] flex items-center justify-between">
+            <span className="text-sm text-gray-400">
+              Showing: <span className={`font-semibold ${
+                statusFilter === 'paid' ? 'text-[#00E054]' :
+                statusFilter === 'unpaid' ? 'text-[#EF4444]' :
+                'text-[#EAB308]'
+              }`}>{statusFilter.toUpperCase()}</span> payments only
+            </span>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setStatusFilter(null)}
+              className="text-gray-400 hover:text-white"
+            >
+              <X size={14} className="mr-1" />
+              Clear filter
+            </Button>
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
@@ -243,7 +284,9 @@ const Payments = () => {
                   </td>
                 </tr>
               ) : (
-                payments.map((payment) => {
+                payments
+                  .filter(p => statusFilter ? p.status === statusFilter : true)
+                  .map((payment) => {
                   const customer = customers.find(c => c.id === payment.customer_id);
                   return (
                     <tr key={payment.id} className="table-row" data-testid={`payment-row-${payment.id}`}>
