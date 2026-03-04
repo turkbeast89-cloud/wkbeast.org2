@@ -616,7 +616,7 @@ const CustomerDashboard = ({ session, onLogout }) => {
         )}
 
         {/* Real Mining Earnings from ViaBTC */}
-        {earningsData && Object.keys(earningsData).some(coin => !earningsData[coin].error) && (
+        {earningsData && Object.keys(earningsData).some(coin => !earningsData[coin].error && parseFloat(earningsData[coin].total_profit || 0) > 0) && (
           <div className="bg-gradient-to-r from-[#F59E0B]/10 to-[#00E054]/10 rounded-xl border border-[#F59E0B]/30 p-6">
             <div className="flex items-center gap-2 mb-4">
               <DollarSign className="text-[#F59E0B]" size={20} />
@@ -626,7 +626,7 @@ const CustomerDashboard = ({ session, onLogout }) => {
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {Object.entries(earningsData).map(([coin, data]) => {
-                if (data.error) return null;
+                if (data.error || parseFloat(data.total_profit || 0) === 0) return null;
                 
                 const coinColors = {
                   LTC: { bg: "bg-gray-500/20", text: "text-gray-300", border: "border-gray-500/30" },
@@ -641,29 +641,43 @@ const CustomerDashboard = ({ session, onLogout }) => {
                     </div>
                     <div className="space-y-2">
                       <div className="flex justify-between items-center">
-                        <span className="text-gray-400 text-sm">Today</span>
-                        <span className={`font-bold ${colors.text}`}>
-                          {parseFloat(data.today_profit || 0).toFixed(8)} {coin}
+                        <span className="text-gray-400 text-sm">Total Mined</span>
+                        <span className={`font-bold text-xl ${colors.text}`}>
+                          {parseFloat(data.total_profit || 0).toFixed(4)} {coin}
                         </span>
                       </div>
-                      <div className="flex justify-between items-center">
-                        <span className="text-gray-400 text-sm">Yesterday</span>
-                        <span className="text-white">
-                          {parseFloat(data.yesterday_profit || 0).toFixed(8)} {coin}
-                        </span>
-                      </div>
-                      <div className="flex justify-between items-center pt-2 border-t border-[#27272A]">
-                        <span className="text-gray-400 text-sm">Unpaid</span>
-                        <span className="text-[#F59E0B] font-bold">
-                          {parseFloat(data.unpaid || 0).toFixed(8)} {coin}
-                        </span>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span className="text-gray-400 text-sm">Total Paid</span>
-                        <span className="text-[#00E054]">
-                          {parseFloat(data.paid || 0).toFixed(8)} {coin}
-                        </span>
-                      </div>
+                      {parseFloat(data.pps_profit || 0) > 0 && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-400 text-sm">PPS Earnings</span>
+                          <span className="text-white">
+                            {parseFloat(data.pps_profit || 0).toFixed(6)} {coin}
+                          </span>
+                        </div>
+                      )}
+                      {parseFloat(data.pplns_profit || 0) > 0 && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-400 text-sm">PPLNS Earnings</span>
+                          <span className="text-white">
+                            {parseFloat(data.pplns_profit || 0).toFixed(6)} {coin}
+                          </span>
+                        </div>
+                      )}
+                      {(parseFloat(data.unpaid || 0) > 0 || parseFloat(data.paid || 0) > 0) && (
+                        <>
+                          <div className="flex justify-between items-center pt-2 border-t border-[#27272A]">
+                            <span className="text-gray-400 text-sm">Unpaid</span>
+                            <span className="text-[#F59E0B] font-bold">
+                              {parseFloat(data.unpaid || 0).toFixed(6)} {coin}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-400 text-sm">Paid Out</span>
+                            <span className="text-[#00E054]">
+                              {parseFloat(data.paid || 0).toFixed(6)} {coin}
+                            </span>
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
                 );

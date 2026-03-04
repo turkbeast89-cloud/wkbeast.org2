@@ -1244,9 +1244,12 @@ async def get_customer_earnings(account_id: str):
                         if resp.status == 200 and data.get("code") == 0:
                             profit_data = data.get("data", {})
                             all_earnings[coin] = {
+                                "total_profit": profit_data.get("total_profit", 0),
+                                "pps_profit": profit_data.get("pps_profit", 0),
+                                "pplns_profit": profit_data.get("pplns_profit", 0),
+                                "solo_profit": profit_data.get("solo_profit", 0),
                                 "today_profit": profit_data.get("today_profit", 0),
                                 "yesterday_profit": profit_data.get("yesterday_profit", 0),
-                                "total_profit": profit_data.get("total_profit", 0),
                                 "unpaid": profit_data.get("unpaid", 0),
                                 "paid": profit_data.get("paid", 0)
                             }
