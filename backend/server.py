@@ -1150,7 +1150,7 @@ async def get_viabtc_earnings(coin: str = "LTC"):
     try:
         tonce = str(int(time.time() * 1000))
         
-        # Try profit endpoint
+        # Fetch profit data
         params = {"coin": coin.upper(), "tonce": tonce}
         query_string = urlencode(params)
         
@@ -1165,35 +1165,100 @@ async def get_viabtc_earnings(coin: str = "LTC"):
             "X-SIGNATURE": signature
         }
         
-        # Test multiple possible endpoints
-        endpoints = [
-            f"https://pool.viabtc.com/res/openapi/v1/profit?{query_string}",
-            f"https://pool.viabtc.com/res/openapi/v1/revenue?{query_string}",
-            f"https://pool.viabtc.com/res/openapi/v1/earnings?{query_string}",
-            f"https://pool.viabtc.com/res/openapi/v1/account/profit?{query_string}",
-        ]
+        url = f"https://pool.viabtc.com/res/openapi/v1/profit?{query_string}"
         
-        results = {}
         async with aiohttp.ClientSession() as session:
-            for url in endpoints:
+            async with session.get(url, headers=headers, timeout=15) as resp:
+                data = await resp.json()
+                
+                if resp.status == 200 and data.get("code") == 0:
+                    return {
+                        "success": True,
+                        "coin": coin.upper(),
+                        "data": data.get("data", {})
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error": data.get("message", "Unknown error"),
+                        "code": data.get("code")
+                    }
+                    
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@api_router.get("/viabtc/customer-earnings/{account_id}")
+async def get_customer_earnings(account_id: str):
+    """Fetch earnings for a specific customer using their API key"""
+    import aiohttp
+    import hashlib
+    import hmac
+    import time
+    from urllib.parse import urlencode
+    
+    # Get customer account
+    account = await db.customer_accounts.find_one({"id": account_id}, {"_id": 0})
+    if not account:
+        return {"success": False, "error": "Account not found"}
+    
+    access_key = account.get("viabtc_api_key", "")
+    secret_key = account.get("viabtc_secret_key", "")
+    
+    if not access_key or not secret_key:
+        # Try main settings for turkbeast
+        settings = await db.viabtc_settings.find_one({"id": "viabtc_settings"}, {"_id": 0})
+        if settings:
+            access_key = settings.get("access_key", "")
+            secret_key = settings.get("secret_key", "")
+    
+    if not access_key or not secret_key:
+        return {"success": False, "error": "No API keys configured"}
+    
+    try:
+        all_earnings = {}
+        coins = ["LTC", "KAS"]  # Add more coins as needed
+        
+        async with aiohttp.ClientSession() as session:
+            for coin in coins:
+                tonce = str(int(time.time() * 1000))
+                params = {"coin": coin, "tonce": tonce}
+                query_string = urlencode(params)
+                
+                signature = hmac.new(
+                    secret_key.encode('utf-8'),
+                    query_string.encode('utf-8'),
+                    hashlib.sha256
+                ).hexdigest()
+                
+                headers = {
+                    "X-API-KEY": access_key,
+                    "X-SIGNATURE": signature
+                }
+                
+                url = f"https://pool.viabtc.com/res/openapi/v1/profit?{query_string}"
+                
                 try:
                     async with session.get(url, headers=headers, timeout=10) as resp:
                         data = await resp.json()
-                        endpoint_name = url.split("/v1/")[1].split("?")[0]
-                        results[endpoint_name] = {
-                            "status": resp.status,
-                            "code": data.get("code"),
-                            "message": data.get("message"),
-                            "data": data.get("data") if data.get("code") == 0 else None
-                        }
+                        
+                        if resp.status == 200 and data.get("code") == 0:
+                            profit_data = data.get("data", {})
+                            all_earnings[coin] = {
+                                "today_profit": profit_data.get("today_profit", 0),
+                                "yesterday_profit": profit_data.get("yesterday_profit", 0),
+                                "total_profit": profit_data.get("total_profit", 0),
+                                "unpaid": profit_data.get("unpaid", 0),
+                                "paid": profit_data.get("paid", 0)
+                            }
+                        else:
+                            all_earnings[coin] = {"error": data.get("message", "Failed")}
                 except Exception as e:
-                    endpoint_name = url.split("/v1/")[1].split("?")[0]
-                    results[endpoint_name] = {"error": str(e)}
+                    all_earnings[coin] = {"error": str(e)}
         
         return {
             "success": True,
-            "coin": coin,
-            "endpoints_tested": results
+            "account_id": account_id,
+            "earnings": all_earnings
         }
         
     except Exception as e:

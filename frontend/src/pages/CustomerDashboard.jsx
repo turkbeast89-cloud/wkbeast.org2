@@ -96,6 +96,7 @@ const CustomerDashboard = ({ session, onLogout }) => {
   const [dashboard, setDashboard] = useState(null);
   const [prices, setPrices] = useState({ ltc: 0, kas: 0, zec: 0 });
   const [workerData, setWorkerData] = useState(null);
+  const [earningsData, setEarningsData] = useState(null);
   const [accountData, setAccountData] = useState(session.account);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -134,6 +135,7 @@ const CustomerDashboard = ({ session, onLogout }) => {
       
       if (accountId && hasApiKey) {
         try {
+          // Fetch workers
           const workerRes = await fetch(`${API}/viabtc/customer-workers/${accountId}`);
           const workerInfo = await workerRes.json();
           
@@ -147,8 +149,16 @@ const CustomerDashboard = ({ session, onLogout }) => {
           } else {
             setWorkerData(null);
           }
+          
+          // Fetch earnings
+          const earningsRes = await fetch(`${API}/viabtc/customer-earnings/${accountId}`);
+          const earningsInfo = await earningsRes.json();
+          
+          if (earningsInfo.success) {
+            setEarningsData(earningsInfo.earnings);
+          }
         } catch (e) {
-          console.log("Could not fetch worker data:", e);
+          console.log("Could not fetch worker/earnings data:", e);
         }
       }
     } catch (e) {
@@ -601,6 +611,68 @@ const CustomerDashboard = ({ session, onLogout }) => {
             <div className="mt-4 pt-4 border-t border-[#27272A] flex items-center justify-center gap-2">
               <div className="w-2 h-2 rounded-full bg-[#00C2FF] animate-pulse"></div>
               <span className="text-xs text-gray-500">Live data from ViaBTC Pool API</span>
+            </div>
+          </div>
+        )}
+
+        {/* Real Mining Earnings from ViaBTC */}
+        {earningsData && Object.keys(earningsData).some(coin => !earningsData[coin].error) && (
+          <div className="bg-gradient-to-r from-[#F59E0B]/10 to-[#00E054]/10 rounded-xl border border-[#F59E0B]/30 p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <DollarSign className="text-[#F59E0B]" size={20} />
+              <h2 className="text-lg font-bold text-white">Mining Earnings</h2>
+              <span className="text-xs bg-[#F59E0B]/20 text-[#F59E0B] px-2 py-0.5 rounded">Live from ViaBTC</span>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {Object.entries(earningsData).map(([coin, data]) => {
+                if (data.error) return null;
+                
+                const coinColors = {
+                  LTC: { bg: "bg-gray-500/20", text: "text-gray-300", border: "border-gray-500/30" },
+                  KAS: { bg: "bg-green-500/20", text: "text-green-400", border: "border-green-500/30" }
+                };
+                const colors = coinColors[coin] || coinColors.LTC;
+                
+                return (
+                  <div key={coin} className={`${colors.bg} rounded-lg p-4 border ${colors.border}`}>
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className={`text-sm font-bold ${colors.text} uppercase`}>{coin}</span>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-400 text-sm">Today</span>
+                        <span className={`font-bold ${colors.text}`}>
+                          {parseFloat(data.today_profit || 0).toFixed(8)} {coin}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-400 text-sm">Yesterday</span>
+                        <span className="text-white">
+                          {parseFloat(data.yesterday_profit || 0).toFixed(8)} {coin}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center pt-2 border-t border-[#27272A]">
+                        <span className="text-gray-400 text-sm">Unpaid</span>
+                        <span className="text-[#F59E0B] font-bold">
+                          {parseFloat(data.unpaid || 0).toFixed(8)} {coin}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-400 text-sm">Total Paid</span>
+                        <span className="text-[#00E054]">
+                          {parseFloat(data.paid || 0).toFixed(8)} {coin}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            
+            <div className="mt-4 pt-4 border-t border-[#27272A] flex items-center justify-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-[#F59E0B] animate-pulse"></div>
+              <span className="text-xs text-gray-500">Real earnings from ViaBTC Pool</span>
             </div>
           </div>
         )}
