@@ -698,7 +698,7 @@ const CustomerDashboard = ({ session, onLogout }) => {
                         <div className={`font-bold text-base ${colors.text}`}>
                           {parseFloat(data.total_profit || 0).toLocaleString(undefined, {maximumFractionDigits: 2})}
                         </div>
-                        <div className="text-[10px] text-gray-500">available</div>
+                      <div className="text-[10px] text-gray-500">not withdrawn</div>
                       </div>
                     );
                   })}
