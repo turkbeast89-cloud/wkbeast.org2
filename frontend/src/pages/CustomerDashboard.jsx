@@ -624,59 +624,83 @@ const CustomerDashboard = ({ session, onLogout }) => {
               <span className="text-xs bg-[#F59E0B]/20 text-[#F59E0B] px-2 py-0.5 rounded">Live from ViaBTC</span>
             </div>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {Object.entries(earningsData).map(([coin, data]) => {
                 if (data.error || parseFloat(data.total_profit || 0) === 0) return null;
                 
                 const coinColors = {
-                  LTC: { bg: "bg-gray-500/20", text: "text-gray-300", border: "border-gray-500/30" },
-                  KAS: { bg: "bg-green-500/20", text: "text-green-400", border: "border-green-500/30" }
+                  LTC: { bg: "bg-gray-500/20", text: "text-gray-300", border: "border-gray-500/30", icon: "💎" },
+                  KAS: { bg: "bg-teal-500/20", text: "text-teal-400", border: "border-teal-500/30", icon: "🟢" },
+                  DOGE: { bg: "bg-yellow-500/20", text: "text-yellow-400", border: "border-yellow-500/30", icon: "🐕" },
+                  BTC: { bg: "bg-orange-500/20", text: "text-orange-400", border: "border-orange-500/30", icon: "₿" },
+                  ZEC: { bg: "bg-yellow-600/20", text: "text-yellow-500", border: "border-yellow-600/30", icon: "Ⓩ" }
                 };
-                const colors = coinColors[coin] || coinColors.LTC;
+                const colors = coinColors[coin] || { bg: "bg-blue-500/20", text: "text-blue-400", border: "border-blue-500/30", icon: "🪙" };
                 
                 return (
                   <div key={coin} className={`${colors.bg} rounded-lg p-4 border ${colors.border}`}>
                     <div className="flex items-center gap-2 mb-3">
+                      <span className="text-lg">{colors.icon}</span>
                       <span className={`text-sm font-bold ${colors.text} uppercase`}>{coin}</span>
                     </div>
                     <div className="space-y-2">
                       <div className="flex justify-between items-center">
                         <span className="text-gray-400 text-sm">Total Mined</span>
-                        <span className={`font-bold text-xl ${colors.text}`}>
+                        <span className={`font-bold text-lg ${colors.text}`}>
                           {parseFloat(data.total_profit || 0).toFixed(4)} {coin}
                         </span>
                       </div>
-                      {parseFloat(data.pps_profit || 0) > 0 && (
+                      {parseFloat(data.today_profit || 0) > 0 && (
                         <div className="flex justify-between items-center">
-                          <span className="text-gray-400 text-sm">PPS Earnings</span>
+                          <span className="text-gray-400 text-sm">Today</span>
+                          <span className="text-[#00E054] font-semibold">
+                            +{parseFloat(data.today_profit || 0).toFixed(6)} {coin}
+                          </span>
+                        </div>
+                      )}
+                      {parseFloat(data.yesterday_profit || 0) > 0 && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-400 text-sm">Yesterday</span>
                           <span className="text-white">
-                            {parseFloat(data.pps_profit || 0).toFixed(6)} {coin}
+                            +{parseFloat(data.yesterday_profit || 0).toFixed(6)} {coin}
+                          </span>
+                        </div>
+                      )}
+                      {parseFloat(data.pps_profit || 0) > 0 && (
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="text-gray-500">PPS</span>
+                          <span className="text-gray-400">
+                            {parseFloat(data.pps_profit || 0).toFixed(4)}
                           </span>
                         </div>
                       )}
                       {parseFloat(data.pplns_profit || 0) > 0 && (
-                        <div className="flex justify-between items-center">
-                          <span className="text-gray-400 text-sm">PPLNS Earnings</span>
-                          <span className="text-white">
-                            {parseFloat(data.pplns_profit || 0).toFixed(6)} {coin}
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="text-gray-500">PPLNS</span>
+                          <span className="text-gray-400">
+                            {parseFloat(data.pplns_profit || 0).toFixed(4)}
                           </span>
                         </div>
                       )}
                       {(parseFloat(data.unpaid || 0) > 0 || parseFloat(data.paid || 0) > 0) && (
-                        <>
-                          <div className="flex justify-between items-center pt-2 border-t border-[#27272A]">
-                            <span className="text-gray-400 text-sm">Unpaid</span>
-                            <span className="text-[#F59E0B] font-bold">
-                              {parseFloat(data.unpaid || 0).toFixed(6)} {coin}
-                            </span>
-                          </div>
-                          <div className="flex justify-between items-center">
-                            <span className="text-gray-400 text-sm">Paid Out</span>
-                            <span className="text-[#00E054]">
-                              {parseFloat(data.paid || 0).toFixed(6)} {coin}
-                            </span>
-                          </div>
-                        </>
+                        <div className="pt-2 border-t border-[#27272A] space-y-1">
+                          {parseFloat(data.unpaid || 0) > 0 && (
+                            <div className="flex justify-between items-center">
+                              <span className="text-gray-400 text-xs">Unpaid</span>
+                              <span className="text-[#F59E0B] font-bold text-sm">
+                                {parseFloat(data.unpaid || 0).toFixed(4)} {coin}
+                              </span>
+                            </div>
+                          )}
+                          {parseFloat(data.paid || 0) > 0 && (
+                            <div className="flex justify-between items-center">
+                              <span className="text-gray-400 text-xs">Paid Out</span>
+                              <span className="text-[#00E054] text-sm">
+                                {parseFloat(data.paid || 0).toFixed(4)} {coin}
+                              </span>
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>

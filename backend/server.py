@@ -1216,7 +1216,7 @@ async def get_customer_earnings(account_id: str):
     
     try:
         all_earnings = {}
-        coins = ["LTC", "KAS"]  # Add more coins as needed
+        coins = ["LTC", "DOGE", "KAS", "BTC", "ZEC"]  # All supported coins
         
         async with aiohttp.ClientSession() as session:
             for coin in coins:
@@ -1243,20 +1243,51 @@ async def get_customer_earnings(account_id: str):
                         
                         if resp.status == 200 and data.get("code") == 0:
                             profit_data = data.get("data", {})
-                            all_earnings[coin] = {
-                                "total_profit": profit_data.get("total_profit", 0),
-                                "pps_profit": profit_data.get("pps_profit", 0),
-                                "pplns_profit": profit_data.get("pplns_profit", 0),
-                                "solo_profit": profit_data.get("solo_profit", 0),
-                                "today_profit": profit_data.get("today_profit", 0),
-                                "yesterday_profit": profit_data.get("yesterday_profit", 0),
-                                "unpaid": profit_data.get("unpaid", 0),
-                                "paid": profit_data.get("paid", 0)
-                            }
-                        else:
-                            all_earnings[coin] = {"error": data.get("message", "Failed")}
+                            # Only add if there's actual profit
+                            total = float(profit_data.get("total_profit", 0) or 0)
+                            if total > 0:
+                                all_earnings[coin] = {
+                                    "total_profit": profit_data.get("total_profit", 0),
+                                    "pps_profit": profit_data.get("pps_profit", 0),
+                                    "pplns_profit": profit_data.get("pplns_profit", 0),
+                                    "solo_profit": profit_data.get("solo_profit", 0),
+                                    "today_profit": profit_data.get("today_profit", 0),
+                                    "yesterday_profit": profit_data.get("yesterday_profit", 0),
+                                    "unpaid": profit_data.get("unpaid", 0),
+                                    "paid": profit_data.get("paid", 0)
+                                }
                 except Exception as e:
-                    all_earnings[coin] = {"error": str(e)}
+                    pass  # Skip coins with errors
+            
+            # Also try to get profit history for daily breakdown
+            for coin in ["LTC", "KAS"]:
+                tonce = str(int(time.time() * 1000))
+                params = {"coin": coin, "tonce": tonce, "page": 1, "limit": 7}
+                query_string = urlencode(params)
+                
+                signature = hmac.new(
+                    secret_key.encode('utf-8'),
+                    query_string.encode('utf-8'),
+                    hashlib.sha256
+                ).hexdigest()
+                
+                headers = {
+                    "X-API-KEY": access_key,
+                    "X-SIGNATURE": signature
+                }
+                
+                # Try profit_history endpoint
+                history_url = f"https://pool.viabtc.com/res/openapi/v1/profit_history?{query_string}"
+                
+                try:
+                    async with session.get(history_url, headers=headers, timeout=10) as resp:
+                        data = await resp.json()
+                        if resp.status == 200 and data.get("code") == 0:
+                            history = data.get("data", {}).get("data", [])
+                            if history and coin in all_earnings:
+                                all_earnings[coin]["history"] = history[:7]  # Last 7 days
+                except:
+                    pass
         
         return {
             "success": True,
