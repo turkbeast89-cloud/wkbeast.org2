@@ -331,7 +331,7 @@ const Dashboard = () => {
                 <div className="flex items-center gap-2 mb-3">
                   <AlertTriangle className="text-[#EF4444]" size={20} />
                   <span className="font-bold text-[#EF4444]">
-                    Offline Machines ({machineMonitor.offline_details.reduce((sum, d) => sum + d.machines, 0)})
+                    Offline Machines ({machineMonitor.offline_details.length})
                   </span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
@@ -340,8 +340,8 @@ const Dashboard = () => {
                       <div className="flex items-center gap-2">
                         <WifiOff size={14} className="text-[#EF4444]" />
                         <div>
-                          <span className="text-sm text-white font-medium">{detail.worker}</span>
-                          <span className="text-xs text-[#EF4444] ml-2">({detail.machines} machines)</span>
+                          <span className="text-sm text-white font-medium">{detail.machine_name || detail.worker}</span>
+                          <span className="text-xs text-gray-500 ml-2">({detail.worker})</span>
                         </div>
                       </div>
                       <span className={`text-xs px-2 py-0.5 rounded ${

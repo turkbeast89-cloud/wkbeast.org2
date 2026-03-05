@@ -1810,7 +1810,7 @@ async def auto_create_customer_accounts():
 # ==================== REAL-TIME MACHINE MONITORING ====================
 @api_router.get("/admin/machine-monitor")
 async def get_machine_monitor():
-    """Get real-time MACHINE status by querying EACH sub-account's API key"""
+    """Get real-time MACHINE status from ViaBTC - showing ACTUAL worker counts"""
     import aiohttp
     import hashlib
     import hmac
@@ -1828,62 +1828,30 @@ async def get_machine_monitor():
     if not main_api_key or not main_secret_key:
         return {"success": False, "error": "Main API keys not configured"}
     
-    # Get all customers with their machines
-    customers = await db.customers.find({}, {"_id": 0}).to_list(1000)
+    # Get customer accounts to map API keys to display names
     customer_accounts = await db.customer_accounts.find({}, {"_id": 0}).to_list(1000)
-    machine_types = await db.machine_types.find({}, {"_id": 0}).to_list(100)
-    machine_types_map = {mt["id"]: mt for mt in machine_types}
+    customers = await db.customers.find({}, {"_id": 0}).to_list(1000)
     
-    # Build customer_id -> account map (with API keys)
-    customer_to_account = {}
+    # Build maps
+    customer_map = {c["id"]: c for c in customers}
+    account_by_api_key = {}  # api_key -> account info
+    
     for acc in customer_accounts:
-        customer_to_account[acc.get("customer_id")] = acc
+        api_key = acc.get("viabtc_api_key")
+        if api_key:
+            customer = customer_map.get(acc.get("customer_id"), {})
+            account_by_api_key[api_key] = {
+                "worker_name": acc.get("worker_name", ""),
+                "display_name": customer.get("name", acc.get("worker_name", "")),
+                "status": customer.get("status", "active")
+            }
     
-    # Build worker_name -> machine count map AND collect API keys
-    worker_machines = {}
-    worker_api_keys = {}  # worker_name -> (api_key, secret_key)
-    
-    for c in customers:
-        account = customer_to_account.get(c.get("id"), {})
-        worker_name = account.get("worker_name", c.get("name", "").lower().replace(" ", "")).lower()
-        customer_status = c.get("status", "active")  # Track if customer is paused
-        
-        # Store API keys for this worker (use sub-account keys if available, else main)
-        api_key = account.get("viabtc_api_key") or main_api_key
-        secret_key = account.get("viabtc_secret_key") or main_secret_key
-        worker_api_keys[worker_name] = (api_key, secret_key)
-        
-        machines = c.get("machines", [])
-        
-        ltc_count = 0
-        kas_count = 0
-        machine_details = []
-        
-        for m in machines:
-            qty = m.get("quantity", 1)
-            mt = machine_types_map.get(m.get("machine_type_id"), {})
-            mt_name = mt.get("name", m.get("machine_name", "")).upper()
-            
-            # Determine coin type by machine name
-            if "KS" in mt_name or "KAS" in mt_name:
-                kas_count += qty
-                machine_details.append({"type": mt_name, "qty": qty, "coin": "KAS"})
-            else:  # L7, L9, etc. are LTC miners
-                ltc_count += qty
-                machine_details.append({"type": mt_name, "qty": qty, "coin": "LTC"})
-        
-        if ltc_count > 0 or kas_count > 0:
-            if worker_name not in worker_machines:
-                worker_machines[worker_name] = {
-                    "display_name": c.get("name"),
-                    "ltc_machines": 0,
-                    "kas_machines": 0,
-                    "details": [],
-                    "status": customer_status  # Store customer status
-                }
-            worker_machines[worker_name]["ltc_machines"] += ltc_count
-            worker_machines[worker_name]["kas_machines"] += kas_count
-            worker_machines[worker_name]["details"].extend(machine_details)
+    # Add main account
+    account_by_api_key[main_api_key] = {
+        "worker_name": "turkbeast",
+        "display_name": "turkbeast (Main)",
+        "status": "active"
+    }
     
     # Helper function to fetch workers for a specific API key
     async def fetch_workers_for_account(session, api_key, secret_key, coin):
@@ -1930,188 +1898,132 @@ async def get_machine_monitor():
         
         return workers
     
-    # Fetch worker status from ViaBTC using EACH account's API key
-    worker_status_map = {}  # worker_name -> {coin: {online, hashrate, worker_count}}
+    # Collect unique API keys to query
+    unique_api_keys = {}
+    for acc in customer_accounts:
+        api_key = acc.get("viabtc_api_key")
+        secret_key = acc.get("viabtc_secret_key")
+        if api_key and secret_key:
+            unique_api_keys[api_key] = secret_key
+    
+    # Always include main account
+    unique_api_keys[main_api_key] = main_secret_key
+    
+    # Fetch real worker data from each account
+    account_stats = []  # List of {account_name, ltc_online, ltc_offline, kas_online, kas_offline, offline_workers}
+    
+    ltc_total_online = 0
+    ltc_total_offline = 0
+    kas_total_online = 0
+    kas_total_offline = 0
+    all_online_details = []
+    all_offline_details = []
     
     async with aiohttp.ClientSession() as session:
-        # Query each unique API key
-        queried_keys = set()
-        
-        for worker_name, (api_key, secret_key) in worker_api_keys.items():
-            # Skip if we already queried this API key
-            if api_key in queried_keys:
+        for api_key, secret_key in unique_api_keys.items():
+            account_info = account_by_api_key.get(api_key, {"worker_name": "unknown", "display_name": "Unknown", "status": "active"})
+            
+            # Skip paused accounts
+            if account_info.get("status") == "paused":
                 continue
-            queried_keys.add(api_key)
             
-            for coin in ["LTC", "KAS"]:
-                workers = await fetch_workers_for_account(session, api_key, secret_key, coin)
+            display_name = account_info["display_name"]
+            worker_name = account_info["worker_name"]
+            
+            ltc_online = 0
+            ltc_offline = 0
+            kas_online = 0
+            kas_offline = 0
+            offline_workers = []
+            online_workers = []
+            
+            # Fetch LTC workers
+            ltc_workers = await fetch_workers_for_account(session, api_key, secret_key, "LTC")
+            for w in ltc_workers:
+                hashrate = int(w.get("hashrate_1hour", 0) or 0)
+                status = w.get("worker_status", "")
+                is_online = hashrate > 0 or status == "active"
                 
-                # Count active workers and total hashrate for this account
-                active_count = sum(1 for w in workers if w.get("worker_status") == "active" or int(w.get("hashrate_1hour", 0) or 0) > 0)
-                total_hashrate = sum(int(w.get("hashrate_1hour", 0) or 0) for w in workers)
+                if is_online:
+                    ltc_online += 1
+                    online_workers.append({"name": w.get("worker_name"), "coin": "LTC", "hashrate": hashrate})
+                else:
+                    ltc_offline += 1
+                    offline_workers.append({"name": w.get("worker_name"), "coin": "LTC", "status": status})
+            
+            # Fetch KAS workers
+            kas_workers = await fetch_workers_for_account(session, api_key, secret_key, "KAS")
+            for w in kas_workers:
+                hashrate = int(w.get("hashrate_1hour", 0) or 0)
+                status = w.get("worker_status", "")
+                is_online = hashrate > 0 or status == "active"
                 
-                # Find which worker_name this API key belongs to
-                for wn, (ak, _) in worker_api_keys.items():
-                    if ak == api_key:
-                        if wn not in worker_status_map:
-                            worker_status_map[wn] = {}
-                        
-                        worker_status_map[wn][coin] = {
-                            "online": active_count > 0,
-                            "active_workers": active_count,
-                            "total_workers": len(workers),
-                            "hashrate": total_hashrate
-                        }
-                        break
-        
-        # Also query main account for turkbeast workers
-        main_workers = await fetch_workers_for_account(session, main_api_key, main_secret_key, "LTC")
-        main_workers_kas = await fetch_workers_for_account(session, main_api_key, main_secret_key, "KAS")
-        
-        # Check if turkbeast is in worker_machines and update its status
-        if "turkbeast" in worker_machines:
-            ltc_active = sum(1 for w in main_workers if w.get("worker_status") == "active" or int(w.get("hashrate_1hour", 0) or 0) > 0)
-            kas_active = sum(1 for w in main_workers_kas if w.get("worker_status") == "active" or int(w.get("hashrate_1hour", 0) or 0) > 0)
+                if is_online:
+                    kas_online += 1
+                    online_workers.append({"name": w.get("worker_name"), "coin": "KAS", "hashrate": hashrate})
+                else:
+                    kas_offline += 1
+                    offline_workers.append({"name": w.get("worker_name"), "coin": "KAS", "status": status})
             
-            if "turkbeast" not in worker_status_map:
-                worker_status_map["turkbeast"] = {}
-            
-            worker_status_map["turkbeast"]["LTC"] = {
-                "online": ltc_active > 0,
-                "active_workers": ltc_active,
-                "total_workers": len(main_workers),
-                "hashrate": sum(int(w.get("hashrate_1hour", 0) or 0) for w in main_workers)
-            }
-            worker_status_map["turkbeast"]["KAS"] = {
-                "online": kas_active > 0,
-                "active_workers": kas_active,
-                "total_workers": len(main_workers_kas),
-                "hashrate": sum(int(w.get("hashrate_1hour", 0) or 0) for w in main_workers_kas)
-            }
-    
-    # Calculate actual machine stats
-    ltc_online = 0
-    ltc_offline = 0
-    kas_online = 0
-    kas_offline = 0
-    ltc_not_synced = 0
-    kas_not_synced = 0
-    offline_details = []
-    online_details = []  # NEW: track online machines
-    not_synced_details = []
-    all_worker_details = []
-    
-    for worker_name, machine_info in worker_machines.items():
-        # Check ViaBTC status for this worker
-        viabtc_status = worker_status_map.get(worker_name, {})
-        
-        ltc_machines = machine_info["ltc_machines"]
-        kas_machines = machine_info["kas_machines"]
-        display_name = machine_info["display_name"]
-        customer_status = machine_info.get("status", "active")  # Get customer status
-        is_paused = customer_status == "paused"
-        
-        ltc_is_online = None
-        kas_is_online = None
-        
-        # LTC machines
-        if ltc_machines > 0:
-            ltc_status = viabtc_status.get("LTC")
-            if ltc_status is not None:
-                ltc_is_online = ltc_status.get("online", False)
-                if ltc_is_online:
-                    ltc_online += ltc_machines
-                    online_details.append({
+            # Only add if has any workers
+            if ltc_online + ltc_offline + kas_online + kas_offline > 0:
+                account_stats.append({
+                    "account": display_name,
+                    "worker_name": worker_name,
+                    "ltc_online": ltc_online,
+                    "ltc_offline": ltc_offline,
+                    "kas_online": kas_online,
+                    "kas_offline": kas_offline,
+                    "total_online": ltc_online + kas_online,
+                    "total_offline": ltc_offline + kas_offline,
+                    "offline_workers": offline_workers,
+                    "online_workers": online_workers
+                })
+                
+                ltc_total_online += ltc_online
+                ltc_total_offline += ltc_offline
+                kas_total_online += kas_online
+                kas_total_offline += kas_offline
+                
+                # Add to online details
+                if ltc_online > 0:
+                    all_online_details.append({
                         "worker": display_name,
                         "worker_name": worker_name,
                         "coin": "LTC",
-                        "machines": ltc_machines,
-                        "active_workers": ltc_status.get("active_workers", 0),
-                        "hashrate": ltc_status.get("hashrate", 0)
+                        "machines": ltc_online
                     })
-                else:
-                    # Only count as offline if customer is NOT paused
-                    if not is_paused:
-                        ltc_offline += ltc_machines
-                        offline_details.append({
-                            "worker": display_name,
-                            "worker_name": worker_name,
-                            "coin": "LTC",
-                            "machines": ltc_machines,
-                            "reason": ltc_status.get("status", "offline")
-                        })
-            else:
-                # Worker not found in ViaBTC - not synced (skip if paused)
-                if not is_paused:
-                    ltc_not_synced += ltc_machines
-                    not_synced_details.append({
-                        "worker": display_name,
-                        "worker_name": worker_name,
-                        "coin": "LTC",
-                        "machines": ltc_machines
-                    })
-        
-        # KAS machines
-        if kas_machines > 0:
-            kas_status = viabtc_status.get("KAS")
-            if kas_status is not None:
-                kas_is_online = kas_status.get("online", False)
-                if kas_is_online:
-                    kas_online += kas_machines
-                    online_details.append({
+                if kas_online > 0:
+                    all_online_details.append({
                         "worker": display_name,
                         "worker_name": worker_name,
                         "coin": "KAS",
-                        "machines": kas_machines,
-                        "active_workers": kas_status.get("active_workers", 0),
-                        "hashrate": kas_status.get("hashrate", 0)
+                        "machines": kas_online
                     })
-                else:
-                    # Only count as offline if customer is NOT paused
-                    if not is_paused:
-                        kas_offline += kas_machines
-                        offline_details.append({
-                            "worker": display_name,
-                            "worker_name": worker_name,
-                            "coin": "KAS",
-                            "machines": kas_machines,
-                        "reason": kas_status.get("status", "offline")
-                    })
-            else:
-                # Worker not found in ViaBTC - not synced (skip if paused)
-                if not is_paused:
-                    kas_not_synced += kas_machines
-                    not_synced_details.append({
+                
+                # Add to offline details
+                for ow in offline_workers:
+                    all_offline_details.append({
                         "worker": display_name,
                         "worker_name": worker_name,
-                        "coin": "KAS",
-                        "machines": kas_machines
+                        "machine_name": ow["name"],
+                        "coin": ow["coin"],
+                        "reason": ow.get("status", "offline")
                     })
-        
-        all_worker_details.append({
-            "worker": display_name,
-            "worker_name": worker_name,
-            "ltc_machines": ltc_machines,
-            "kas_machines": kas_machines,
-            "ltc_online": ltc_is_online,
-            "kas_online": kas_is_online
-        })
     
-    total_online = ltc_online + kas_online
-    total_offline = ltc_offline + kas_offline
-    total_not_synced = ltc_not_synced + kas_not_synced
+    total_online = ltc_total_online + kas_total_online
+    total_offline = ltc_total_offline + kas_total_offline
     
     return {
         "success": True,
         "stats": {
-            "ltc": {"online": ltc_online, "offline": ltc_offline, "not_synced": ltc_not_synced, "total": ltc_online + ltc_offline},
-            "kas": {"online": kas_online, "offline": kas_offline, "not_synced": kas_not_synced, "total": kas_online + kas_offline},
-            "total": {"online": total_online, "offline": total_offline, "not_synced": total_not_synced, "total": total_online + total_offline}
+            "ltc": {"online": ltc_total_online, "offline": ltc_total_offline, "total": ltc_total_online + ltc_total_offline},
+            "kas": {"online": kas_total_online, "offline": kas_total_offline, "total": kas_total_online + kas_total_offline},
+            "total": {"online": total_online, "offline": total_offline, "total": total_online + total_offline}
         },
-        "online_details": online_details,
-        "offline_details": offline_details,
-        "not_synced_details": not_synced_details,
-        "all_workers": all_worker_details
+        "accounts": account_stats,  # Detailed per-account stats
+        "online_details": all_online_details,
+        "offline_details": all_offline_details
     }
 
 # Include the router
