@@ -12,6 +12,8 @@ import uuid
 from datetime import datetime, timezone
 from io import BytesIO
 import openpyxl
+import asyncio
+import time
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -20,6 +22,10 @@ load_dotenv(ROOT_DIR / '.env')
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
+
+# Simple cache for machine monitor (30 second TTL)
+_machine_monitor_cache = {"data": None, "timestamp": 0}
+CACHE_TTL = 30  # seconds
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
@@ -1809,13 +1815,18 @@ async def auto_create_customer_accounts():
 
 # ==================== REAL-TIME MACHINE MONITORING ====================
 @api_router.get("/admin/machine-monitor")
-async def get_machine_monitor():
+async def get_machine_monitor(force_refresh: bool = False):
     """Get real-time MACHINE status from ViaBTC - showing ACTUAL worker counts"""
+    global _machine_monitor_cache
     import aiohttp
     import hashlib
     import hmac
-    import time
     from urllib.parse import urlencode
+    
+    # Check cache first (unless force refresh)
+    current_time = time.time()
+    if not force_refresh and _machine_monitor_cache["data"] and (current_time - _machine_monitor_cache["timestamp"]) < CACHE_TTL:
+        return _machine_monitor_cache["data"]
     
     # Get MAIN API settings
     settings = await db.viabtc_settings.find_one({"id": "viabtc_settings"}, {"_id": 0})
@@ -1928,8 +1939,8 @@ async def get_machine_monitor():
     # Always include main account
     unique_api_keys[main_api_key] = main_secret_key
     
-    # Fetch real worker data from each account
-    account_stats = []  # List of {account_name, ltc_online, ltc_offline, kas_online, kas_offline, offline_workers}
+    # Fetch real worker data from ALL accounts in PARALLEL
+    account_stats = []
     
     ltc_total_online = 0
     ltc_total_offline = 0
@@ -1939,15 +1950,22 @@ async def get_machine_monitor():
     all_offline_details = []
     
     async with aiohttp.ClientSession() as session:
-        for api_key, secret_key in unique_api_keys.items():
+        # Create tasks for ALL API calls (both LTC and KAS for each account)
+        async def fetch_account_data(api_key, secret_key):
             account_info = account_by_api_key.get(api_key, {"worker_name": "unknown", "display_name": "Unknown", "status": "active"})
             
             # Skip paused accounts
             if account_info.get("status") == "paused":
-                continue
+                return None
             
             display_name = account_info["display_name"]
             worker_name = account_info["worker_name"]
+            
+            # Fetch LTC and KAS workers in parallel
+            ltc_workers, kas_workers = await asyncio.gather(
+                fetch_workers_for_account(session, api_key, secret_key, "LTC"),
+                fetch_workers_for_account(session, api_key, secret_key, "KAS")
+            )
             
             ltc_online = 0
             ltc_offline = 0
@@ -1956,15 +1974,13 @@ async def get_machine_monitor():
             offline_workers = []
             online_workers = []
             
-            # Fetch LTC workers
-            ltc_workers = await fetch_workers_for_account(session, api_key, secret_key, "LTC")
+            # Process LTC workers
             for w in ltc_workers:
                 worker_name_viabtc = w.get("worker_name", "")
                 hashrate = int(w.get("hashrate_1hour", 0) or 0)
                 status = w.get("worker_status", "")
                 is_online = hashrate > 0 or status == "active"
                 
-                # Skip workers belonging to paused customers
                 if is_worker_paused(worker_name_viabtc):
                     continue
                 
@@ -1975,15 +1991,13 @@ async def get_machine_monitor():
                     ltc_offline += 1
                     offline_workers.append({"name": worker_name_viabtc, "coin": "LTC", "status": status})
             
-            # Fetch KAS workers
-            kas_workers = await fetch_workers_for_account(session, api_key, secret_key, "KAS")
+            # Process KAS workers
             for w in kas_workers:
                 worker_name_viabtc = w.get("worker_name", "")
                 hashrate = int(w.get("hashrate_1hour", 0) or 0)
                 status = w.get("worker_status", "")
                 is_online = hashrate > 0 or status == "active"
                 
-                # Skip workers belonging to paused customers
                 if is_worker_paused(worker_name_viabtc):
                     continue
                 
@@ -1994,9 +2008,8 @@ async def get_machine_monitor():
                     kas_offline += 1
                     offline_workers.append({"name": worker_name_viabtc, "coin": "KAS", "status": status})
             
-            # Only add if has any workers
             if ltc_online + ltc_offline + kas_online + kas_offline > 0:
-                account_stats.append({
+                return {
                     "account": display_name,
                     "worker_name": worker_name,
                     "ltc_online": ltc_online,
@@ -2007,31 +2020,43 @@ async def get_machine_monitor():
                     "total_offline": ltc_offline + kas_offline,
                     "offline_workers": offline_workers,
                     "online_workers": online_workers
-                })
+                }
+            return None
+        
+        # Execute ALL account fetches in parallel
+        import asyncio
+        tasks = [fetch_account_data(api_key, secret_key) for api_key, secret_key in unique_api_keys.items()]
+        results = await asyncio.gather(*tasks)
+        
+        # Process results
+        for result in results:
+            if result:
+                account_stats.append(result)
                 
-                ltc_total_online += ltc_online
-                ltc_total_offline += ltc_offline
-                kas_total_online += kas_online
-                kas_total_offline += kas_offline
+                ltc_total_online += result["ltc_online"]
+                ltc_total_offline += result["ltc_offline"]
+                kas_total_online += result["kas_online"]
+                kas_total_offline += result["kas_offline"]
                 
-                # Add to online details
-                if ltc_online > 0:
+                display_name = result["account"]
+                worker_name = result["worker_name"]
+                
+                if result["ltc_online"] > 0:
                     all_online_details.append({
                         "worker": display_name,
                         "worker_name": worker_name,
                         "coin": "LTC",
-                        "machines": ltc_online
+                        "machines": result["ltc_online"]
                     })
-                if kas_online > 0:
+                if result["kas_online"] > 0:
                     all_online_details.append({
                         "worker": display_name,
                         "worker_name": worker_name,
                         "coin": "KAS",
-                        "machines": kas_online
+                        "machines": result["kas_online"]
                     })
                 
-                # Add to offline details
-                for ow in offline_workers:
+                for ow in result["offline_workers"]:
                     all_offline_details.append({
                         "worker": display_name,
                         "worker_name": worker_name,
@@ -2043,17 +2068,24 @@ async def get_machine_monitor():
     total_online = ltc_total_online + kas_total_online
     total_offline = ltc_total_offline + kas_total_offline
     
-    return {
+    result = {
         "success": True,
         "stats": {
             "ltc": {"online": ltc_total_online, "offline": ltc_total_offline, "total": ltc_total_online + ltc_total_offline},
             "kas": {"online": kas_total_online, "offline": kas_total_offline, "total": kas_total_online + kas_total_offline},
             "total": {"online": total_online, "offline": total_offline, "total": total_online + total_offline}
         },
-        "accounts": account_stats,  # Detailed per-account stats
+        "accounts": account_stats,
         "online_details": all_online_details,
-        "offline_details": all_offline_details
+        "offline_details": all_offline_details,
+        "cached_at": current_time
     }
+    
+    # Update cache
+    _machine_monitor_cache["data"] = result
+    _machine_monitor_cache["timestamp"] = current_time
+    
+    return result
 
 # Include the router
 app.include_router(api_router)

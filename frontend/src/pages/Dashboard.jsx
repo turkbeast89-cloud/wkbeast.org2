@@ -41,9 +41,9 @@ const Dashboard = () => {
     }
   };
 
-  const fetchMachineMonitor = async () => {
+  const fetchMachineMonitor = async (forceRefresh = false) => {
     try {
-      const res = await axios.get(`${API}/admin/machine-monitor`);
+      const res = await axios.get(`${API}/admin/machine-monitor${forceRefresh ? '?force_refresh=true' : ''}`);
       if (res.data.success) {
         setMachineMonitor(res.data);
       }
@@ -57,7 +57,7 @@ const Dashboard = () => {
 
   const handleRefreshMonitor = () => {
     setRefreshing(true);
-    fetchMachineMonitor();
+    fetchMachineMonitor(true);  // Force refresh when clicking the button
   };
 
   if (loading) {
