@@ -1754,49 +1754,75 @@ async def get_machine_monitor():
     async with aiohttp.ClientSession() as session:
         # Fetch workers for LTC and KAS using main account
         for coin in ["LTC", "KAS"]:
-            try:
-                tonce = str(int(time.time() * 1000))
-                params = {"coin": coin, "limit": 500, "tonce": tonce}
-                query_string = urlencode(params)
-                
-                signature = hmac.new(
-                    secret_key.encode('utf-8'),
-                    query_string.encode('utf-8'),
-                    hashlib.sha256
-                ).hexdigest()
-                
-                headers = {
-                    "X-API-KEY": api_key,
-                    "X-SIGNATURE": signature
-                }
-                
-                # Use hashrate/worker endpoint (same as customer dashboard)
-                url = f"https://pool.viabtc.com/res/openapi/v1/hashrate/worker?{query_string}"
-                
-                async with session.get(url, headers=headers, timeout=15) as resp:
-                    data = await resp.json()
+            page = 1
+            has_more = True
+            
+            while has_more and page <= 10:  # Max 10 pages to avoid infinite loop
+                try:
+                    tonce = str(int(time.time() * 1000))
+                    params = {"coin": coin, "limit": 100, "page": page, "tonce": tonce}
+                    query_string = urlencode(params)
                     
-                    if resp.status == 200 and data.get("code") == 0:
-                        workers = data.get("data", {}).get("data", [])
+                    signature = hmac.new(
+                        secret_key.encode('utf-8'),
+                        query_string.encode('utf-8'),
+                        hashlib.sha256
+                    ).hexdigest()
+                    
+                    headers = {
+                        "X-API-KEY": api_key,
+                        "X-SIGNATURE": signature
+                    }
+                    
+                    # Use hashrate/worker endpoint (same as customer dashboard)
+                    url = f"https://pool.viabtc.com/res/openapi/v1/hashrate/worker?{query_string}"
+                    
+                    async with session.get(url, headers=headers, timeout=15) as resp:
+                        data = await resp.json()
                         
-                        for w in workers:
-                            # Determine status - active means online
-                            status = "online" if w.get("worker_status") == "active" else "offline"
+                        if resp.status == 200 and data.get("code") == 0:
+                            workers = data.get("data", {}).get("data", [])
                             
-                            all_workers.append({
-                                "name": w.get("worker_name", w.get("name", "Unknown")),
-                                "coin": coin,
-                                "status": status,
-                                "hashrate": w.get("hashrate_1hour", w.get("hashrate_1h", 0)),
-                                "hashrate_unit": w.get("hashrate_unit", "H/s"),
-                                "worker_status": w.get("worker_status", "unknown")
-                            })
-            except Exception as e:
-                print(f"Error fetching {coin} workers: {e}")
+                            if not workers:
+                                has_more = False
+                                break
+                            
+                            for w in workers:
+                                # Determine status based on hashrate - if hashrate > 0, it's online
+                                hashrate = int(w.get("hashrate_1hour", 0) or 0)
+                                hashrate_10min = int(w.get("hashrate_10min", 0) or 0)
+                                worker_status = w.get("worker_status", "")
+                                
+                                # Online if has recent hashrate OR status is "active"
+                                status = "online" if (hashrate > 0 or hashrate_10min > 0 or worker_status == "active") else "offline"
+                                
+                                all_workers.append({
+                                    "name": w.get("worker_name", w.get("name", "Unknown")),
+                                    "coin": coin,
+                                    "status": status,
+                                    "hashrate": hashrate,
+                                    "hashrate_10min": hashrate_10min,
+                                    "hashrate_unit": "H/s",
+                                    "worker_status": worker_status
+                                })
+                            
+                            # Check if we got less than limit (means no more pages)
+                            if len(workers) < 100:
+                                has_more = False
+                            else:
+                                page += 1
+                        else:
+                            has_more = False
+                except Exception as e:
+                    print(f"Error fetching {coin} workers page {page}: {e}")
+                    has_more = False
+    
+    # Filter out invalid/empty workers
+    valid_workers = [w for w in all_workers if w.get("name") and w.get("name") != "Unknown"]
     
     # Calculate stats
-    ltc_workers = [w for w in all_workers if w["coin"] == "LTC"]
-    kas_workers = [w for w in all_workers if w["coin"] == "KAS"]
+    ltc_workers = [w for w in valid_workers if w["coin"] == "LTC"]
+    kas_workers = [w for w in valid_workers if w["coin"] == "KAS"]
     
     ltc_online = len([w for w in ltc_workers if w["status"] == "online"])
     ltc_offline = len([w for w in ltc_workers if w["status"] == "offline"])
@@ -1807,17 +1833,17 @@ async def get_machine_monitor():
     total_offline = ltc_offline + kas_offline
     
     # Get offline workers for alert
-    offline_workers = [w for w in all_workers if w["status"] == "offline"]
+    offline_workers = [w for w in valid_workers if w["status"] == "offline"]
     
     return {
         "success": True,
         "stats": {
             "ltc": {"online": ltc_online, "offline": ltc_offline, "total": len(ltc_workers)},
             "kas": {"online": kas_online, "offline": kas_offline, "total": len(kas_workers)},
-            "total": {"online": total_online, "offline": total_offline, "total": len(all_workers)}
+            "total": {"online": total_online, "offline": total_offline, "total": len(valid_workers)}
         },
         "offline_workers": offline_workers,
-        "all_workers": all_workers
+        "all_workers": valid_workers
     }
 
 # Include the router
