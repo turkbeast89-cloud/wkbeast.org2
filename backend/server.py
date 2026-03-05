@@ -1846,6 +1846,7 @@ async def get_machine_monitor():
     for c in customers:
         account = customer_to_account.get(c.get("id"), {})
         worker_name = account.get("worker_name", c.get("name", "").lower().replace(" ", "")).lower()
+        customer_status = c.get("status", "active")  # Track if customer is paused
         
         # Store API keys for this worker (use sub-account keys if available, else main)
         api_key = account.get("viabtc_api_key") or main_api_key
@@ -1877,7 +1878,8 @@ async def get_machine_monitor():
                     "display_name": c.get("name"),
                     "ltc_machines": 0,
                     "kas_machines": 0,
-                    "details": []
+                    "details": [],
+                    "status": customer_status  # Store customer status
                 }
             worker_machines[worker_name]["ltc_machines"] += ltc_count
             worker_machines[worker_name]["kas_machines"] += kas_count
@@ -2006,6 +2008,8 @@ async def get_machine_monitor():
         ltc_machines = machine_info["ltc_machines"]
         kas_machines = machine_info["kas_machines"]
         display_name = machine_info["display_name"]
+        customer_status = machine_info.get("status", "active")  # Get customer status
+        is_paused = customer_status == "paused"
         
         ltc_is_online = None
         kas_is_online = None
@@ -2026,23 +2030,26 @@ async def get_machine_monitor():
                         "hashrate": ltc_status.get("hashrate", 0)
                     })
                 else:
-                    ltc_offline += ltc_machines
-                    offline_details.append({
+                    # Only count as offline if customer is NOT paused
+                    if not is_paused:
+                        ltc_offline += ltc_machines
+                        offline_details.append({
+                            "worker": display_name,
+                            "worker_name": worker_name,
+                            "coin": "LTC",
+                            "machines": ltc_machines,
+                            "reason": ltc_status.get("status", "offline")
+                        })
+            else:
+                # Worker not found in ViaBTC - not synced (skip if paused)
+                if not is_paused:
+                    ltc_not_synced += ltc_machines
+                    not_synced_details.append({
                         "worker": display_name,
                         "worker_name": worker_name,
                         "coin": "LTC",
-                        "machines": ltc_machines,
-                        "reason": ltc_status.get("status", "offline")
+                        "machines": ltc_machines
                     })
-            else:
-                # Worker not found in ViaBTC - not synced
-                ltc_not_synced += ltc_machines
-                not_synced_details.append({
-                    "worker": display_name,
-                    "worker_name": worker_name,
-                    "coin": "LTC",
-                    "machines": ltc_machines
-                })
         
         # KAS machines
         if kas_machines > 0:
@@ -2060,23 +2067,26 @@ async def get_machine_monitor():
                         "hashrate": kas_status.get("hashrate", 0)
                     })
                 else:
-                    kas_offline += kas_machines
-                    offline_details.append({
-                        "worker": display_name,
-                        "worker_name": worker_name,
-                        "coin": "KAS",
-                        "machines": kas_machines,
+                    # Only count as offline if customer is NOT paused
+                    if not is_paused:
+                        kas_offline += kas_machines
+                        offline_details.append({
+                            "worker": display_name,
+                            "worker_name": worker_name,
+                            "coin": "KAS",
+                            "machines": kas_machines,
                         "reason": kas_status.get("status", "offline")
                     })
             else:
-                # Worker not found in ViaBTC - not synced
-                kas_not_synced += kas_machines
-                not_synced_details.append({
-                    "worker": display_name,
-                    "worker_name": worker_name,
-                    "coin": "KAS",
-                    "machines": kas_machines
-                })
+                # Worker not found in ViaBTC - not synced (skip if paused)
+                if not is_paused:
+                    kas_not_synced += kas_machines
+                    not_synced_details.append({
+                        "worker": display_name,
+                        "worker_name": worker_name,
+                        "coin": "KAS",
+                        "machines": kas_machines
+                    })
         
         all_worker_details.append({
             "worker": display_name,
