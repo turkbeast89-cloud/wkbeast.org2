@@ -202,6 +202,9 @@ const Dashboard = () => {
                 <div className="flex items-center gap-2 mb-3">
                   <span className="text-xl">💎</span>
                   <span className="font-bold text-gray-300">LTC Miners</span>
+                  {machineMonitor.stats.ltc.not_synced > 0 && (
+                    <span className="text-xs text-gray-500">({machineMonitor.stats.ltc.not_synced} not synced)</span>
+                  )}
                 </div>
                 <div className="flex items-center justify-between">
                   <div className="text-center">
@@ -220,7 +223,7 @@ const Dashboard = () => {
                   </div>
                   <div className="text-center">
                     <span className="text-2xl font-bold text-white">{machineMonitor.stats.ltc.total}</span>
-                    <p className="text-xs text-gray-500">Total</p>
+                    <p className="text-xs text-gray-500">Synced</p>
                   </div>
                 </div>
               </div>
@@ -230,6 +233,9 @@ const Dashboard = () => {
                 <div className="flex items-center gap-2 mb-3">
                   <span className="text-xl">🟢</span>
                   <span className="font-bold text-teal-300">KAS Miners</span>
+                  {machineMonitor.stats.kas.not_synced > 0 && (
+                    <span className="text-xs text-gray-500">({machineMonitor.stats.kas.not_synced} not synced)</span>
+                  )}
                 </div>
                 <div className="flex items-center justify-between">
                   <div className="text-center">
@@ -248,7 +254,7 @@ const Dashboard = () => {
                   </div>
                   <div className="text-center">
                     <span className="text-2xl font-bold text-white">{machineMonitor.stats.kas.total}</span>
-                    <p className="text-xs text-gray-500">Total</p>
+                    <p className="text-xs text-gray-500">Synced</p>
                   </div>
                 </div>
               </div>
@@ -258,6 +264,9 @@ const Dashboard = () => {
                 <div className="flex items-center gap-2 mb-3">
                   <span className="text-xl">⚡</span>
                   <span className="font-bold text-[#7C3AED]">All Miners</span>
+                  {machineMonitor.stats.total.not_synced > 0 && (
+                    <span className="text-xs text-gray-500">({machineMonitor.stats.total.not_synced} not synced)</span>
+                  )}
                 </div>
                 <div className="flex items-center justify-between">
                   <div className="text-center">
@@ -276,7 +285,7 @@ const Dashboard = () => {
                   </div>
                   <div className="text-center">
                     <span className="text-2xl font-bold text-white">{machineMonitor.stats.total.total}</span>
-                    <p className="text-xs text-gray-500">Total</p>
+                    <p className="text-xs text-gray-500">Synced</p>
                   </div>
                 </div>
               </div>

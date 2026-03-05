@@ -1864,7 +1864,10 @@ async def get_machine_monitor():
     ltc_offline = 0
     kas_online = 0
     kas_offline = 0
+    ltc_not_synced = 0
+    kas_not_synced = 0
     offline_details = []
+    not_synced_details = []
     all_worker_details = []
     
     for worker_name, machine_info in worker_machines.items():
@@ -1875,39 +1878,59 @@ async def get_machine_monitor():
         kas_machines = machine_info["kas_machines"]
         display_name = machine_info["display_name"]
         
-        ltc_is_online = False
-        kas_is_online = False
+        ltc_is_online = None
+        kas_is_online = None
         
         # LTC machines
         if ltc_machines > 0:
-            ltc_status = viabtc_status.get("LTC", {})
-            ltc_is_online = ltc_status.get("online", False)
-            if ltc_is_online:
-                ltc_online += ltc_machines
+            ltc_status = viabtc_status.get("LTC")
+            if ltc_status is not None:
+                ltc_is_online = ltc_status.get("online", False)
+                if ltc_is_online:
+                    ltc_online += ltc_machines
+                else:
+                    ltc_offline += ltc_machines
+                    offline_details.append({
+                        "worker": display_name,
+                        "worker_name": worker_name,
+                        "coin": "LTC",
+                        "machines": ltc_machines,
+                        "reason": ltc_status.get("status", "offline")
+                    })
             else:
-                ltc_offline += ltc_machines
-                offline_details.append({
+                # Worker not found in ViaBTC - not synced
+                ltc_not_synced += ltc_machines
+                not_synced_details.append({
                     "worker": display_name,
                     "worker_name": worker_name,
                     "coin": "LTC",
-                    "machines": ltc_machines,
-                    "reason": ltc_status.get("status") if ltc_status else "not found in ViaBTC"
+                    "machines": ltc_machines
                 })
         
         # KAS machines
         if kas_machines > 0:
-            kas_status = viabtc_status.get("KAS", {})
-            kas_is_online = kas_status.get("online", False)
-            if kas_is_online:
-                kas_online += kas_machines
+            kas_status = viabtc_status.get("KAS")
+            if kas_status is not None:
+                kas_is_online = kas_status.get("online", False)
+                if kas_is_online:
+                    kas_online += kas_machines
+                else:
+                    kas_offline += kas_machines
+                    offline_details.append({
+                        "worker": display_name,
+                        "worker_name": worker_name,
+                        "coin": "KAS",
+                        "machines": kas_machines,
+                        "reason": kas_status.get("status", "offline")
+                    })
             else:
-                kas_offline += kas_machines
-                offline_details.append({
+                # Worker not found in ViaBTC - not synced
+                kas_not_synced += kas_machines
+                not_synced_details.append({
                     "worker": display_name,
                     "worker_name": worker_name,
                     "coin": "KAS",
-                    "machines": kas_machines,
-                    "reason": kas_status.get("status") if kas_status else "not found in ViaBTC"
+                    "machines": kas_machines
                 })
         
         all_worker_details.append({
@@ -1921,15 +1944,17 @@ async def get_machine_monitor():
     
     total_online = ltc_online + kas_online
     total_offline = ltc_offline + kas_offline
+    total_not_synced = ltc_not_synced + kas_not_synced
     
     return {
         "success": True,
         "stats": {
-            "ltc": {"online": ltc_online, "offline": ltc_offline, "total": ltc_online + ltc_offline},
-            "kas": {"online": kas_online, "offline": kas_offline, "total": kas_online + kas_offline},
-            "total": {"online": total_online, "offline": total_offline, "total": total_online + total_offline}
+            "ltc": {"online": ltc_online, "offline": ltc_offline, "not_synced": ltc_not_synced, "total": ltc_online + ltc_offline},
+            "kas": {"online": kas_online, "offline": kas_offline, "not_synced": kas_not_synced, "total": kas_online + kas_offline},
+            "total": {"online": total_online, "offline": total_offline, "not_synced": total_not_synced, "total": total_online + total_offline}
         },
         "offline_details": offline_details,
+        "not_synced_details": not_synced_details,
         "all_workers": all_worker_details
     }
 
