@@ -1731,7 +1731,7 @@ async def auto_create_customer_accounts():
 # ==================== REAL-TIME MACHINE MONITORING ====================
 @api_router.get("/admin/machine-monitor")
 async def get_machine_monitor():
-    """Get real-time machine status using MAIN account API key (sees all workers)"""
+    """Get real-time MACHINE status by combining ViaBTC worker status with customer machine data"""
     import aiohttp
     import hashlib
     import hmac
@@ -1749,15 +1749,63 @@ async def get_machine_monitor():
     if not api_key or not secret_key:
         return {"success": False, "error": "Main API keys not configured"}
     
-    all_workers = []
+    # Get all customers with their machines
+    customers = await db.customers.find({}, {"_id": 0}).to_list(1000)
+    customer_accounts = await db.customer_accounts.find({}, {"_id": 0}).to_list(1000)
+    machine_types = await db.machine_types.find({}, {"_id": 0}).to_list(100)
+    machine_types_map = {mt["id"]: mt for mt in machine_types}
+    
+    # Build customer_id -> worker_name map from customer_accounts
+    customer_to_worker = {}
+    for acc in customer_accounts:
+        customer_to_worker[acc.get("customer_id")] = acc.get("worker_name", "").lower()
+    
+    # Build worker_name -> machine count map
+    worker_machines = {}
+    for c in customers:
+        # Get worker name from customer_accounts mapping
+        worker_name = customer_to_worker.get(c.get("id"), c.get("name", "").lower().replace(" ", ""))
+        
+        machines = c.get("machines", [])
+        
+        ltc_count = 0
+        kas_count = 0
+        machine_details = []
+        
+        for m in machines:
+            qty = m.get("quantity", 1)
+            mt = machine_types_map.get(m.get("machine_type_id"), {})
+            mt_name = mt.get("name", m.get("machine_name", "")).upper()
+            
+            # Determine coin type by machine name
+            if "KS" in mt_name or "KAS" in mt_name:
+                kas_count += qty
+                machine_details.append({"type": mt_name, "qty": qty, "coin": "KAS"})
+            else:  # L7, L9, etc. are LTC miners
+                ltc_count += qty
+                machine_details.append({"type": mt_name, "qty": qty, "coin": "LTC"})
+        
+        if ltc_count > 0 or kas_count > 0:
+            if worker_name not in worker_machines:
+                worker_machines[worker_name] = {
+                    "display_name": c.get("name"),
+                    "ltc_machines": 0,
+                    "kas_machines": 0,
+                    "details": []
+                }
+            worker_machines[worker_name]["ltc_machines"] += ltc_count
+            worker_machines[worker_name]["kas_machines"] += kas_count
+            worker_machines[worker_name]["details"].extend(machine_details)
+    
+    # Fetch worker status from ViaBTC
+    worker_status_map = {}
     
     async with aiohttp.ClientSession() as session:
-        # Fetch workers for LTC and KAS using main account
         for coin in ["LTC", "KAS"]:
             page = 1
             has_more = True
             
-            while has_more and page <= 10:  # Max 10 pages to avoid infinite loop
+            while has_more and page <= 10:
                 try:
                     tonce = str(int(time.time() * 1000))
                     params = {"coin": coin, "limit": 100, "page": page, "tonce": tonce}
@@ -1774,7 +1822,6 @@ async def get_machine_monitor():
                         "X-SIGNATURE": signature
                     }
                     
-                    # Use hashrate/worker endpoint (same as customer dashboard)
                     url = f"https://pool.viabtc.com/res/openapi/v1/hashrate/worker?{query_string}"
                     
                     async with session.get(url, headers=headers, timeout=15) as resp:
@@ -1788,25 +1835,20 @@ async def get_machine_monitor():
                                 break
                             
                             for w in workers:
-                                # Determine status based on hashrate - if hashrate > 0, it's online
+                                worker_name = w.get("worker_name", "").lower()
                                 hashrate = int(w.get("hashrate_1hour", 0) or 0)
-                                hashrate_10min = int(w.get("hashrate_10min", 0) or 0)
                                 worker_status = w.get("worker_status", "")
+                                is_online = hashrate > 0 or worker_status == "active"
                                 
-                                # Online if has recent hashrate OR status is "active"
-                                status = "online" if (hashrate > 0 or hashrate_10min > 0 or worker_status == "active") else "offline"
+                                if worker_name not in worker_status_map:
+                                    worker_status_map[worker_name] = {}
                                 
-                                all_workers.append({
-                                    "name": w.get("worker_name", w.get("name", "Unknown")),
-                                    "coin": coin,
-                                    "status": status,
+                                worker_status_map[worker_name][coin] = {
+                                    "online": is_online,
                                     "hashrate": hashrate,
-                                    "hashrate_10min": hashrate_10min,
-                                    "hashrate_unit": "H/s",
-                                    "worker_status": worker_status
-                                })
+                                    "status": worker_status
+                                }
                             
-                            # Check if we got less than limit (means no more pages)
                             if len(workers) < 100:
                                 has_more = False
                             else:
@@ -1817,33 +1859,78 @@ async def get_machine_monitor():
                     print(f"Error fetching {coin} workers page {page}: {e}")
                     has_more = False
     
-    # Filter out invalid/empty workers
-    valid_workers = [w for w in all_workers if w.get("name") and w.get("name") != "Unknown"]
+    # Calculate actual machine stats
+    ltc_online = 0
+    ltc_offline = 0
+    kas_online = 0
+    kas_offline = 0
+    offline_details = []
+    all_worker_details = []
     
-    # Calculate stats
-    ltc_workers = [w for w in valid_workers if w["coin"] == "LTC"]
-    kas_workers = [w for w in valid_workers if w["coin"] == "KAS"]
-    
-    ltc_online = len([w for w in ltc_workers if w["status"] == "online"])
-    ltc_offline = len([w for w in ltc_workers if w["status"] == "offline"])
-    kas_online = len([w for w in kas_workers if w["status"] == "online"])
-    kas_offline = len([w for w in kas_workers if w["status"] == "offline"])
+    for worker_name, machine_info in worker_machines.items():
+        # Check ViaBTC status for this worker
+        viabtc_status = worker_status_map.get(worker_name, {})
+        
+        ltc_machines = machine_info["ltc_machines"]
+        kas_machines = machine_info["kas_machines"]
+        display_name = machine_info["display_name"]
+        
+        ltc_is_online = False
+        kas_is_online = False
+        
+        # LTC machines
+        if ltc_machines > 0:
+            ltc_status = viabtc_status.get("LTC", {})
+            ltc_is_online = ltc_status.get("online", False)
+            if ltc_is_online:
+                ltc_online += ltc_machines
+            else:
+                ltc_offline += ltc_machines
+                offline_details.append({
+                    "worker": display_name,
+                    "worker_name": worker_name,
+                    "coin": "LTC",
+                    "machines": ltc_machines,
+                    "reason": ltc_status.get("status") if ltc_status else "not found in ViaBTC"
+                })
+        
+        # KAS machines
+        if kas_machines > 0:
+            kas_status = viabtc_status.get("KAS", {})
+            kas_is_online = kas_status.get("online", False)
+            if kas_is_online:
+                kas_online += kas_machines
+            else:
+                kas_offline += kas_machines
+                offline_details.append({
+                    "worker": display_name,
+                    "worker_name": worker_name,
+                    "coin": "KAS",
+                    "machines": kas_machines,
+                    "reason": kas_status.get("status") if kas_status else "not found in ViaBTC"
+                })
+        
+        all_worker_details.append({
+            "worker": display_name,
+            "worker_name": worker_name,
+            "ltc_machines": ltc_machines,
+            "kas_machines": kas_machines,
+            "ltc_online": ltc_is_online,
+            "kas_online": kas_is_online
+        })
     
     total_online = ltc_online + kas_online
     total_offline = ltc_offline + kas_offline
     
-    # Get offline workers for alert
-    offline_workers = [w for w in valid_workers if w["status"] == "offline"]
-    
     return {
         "success": True,
         "stats": {
-            "ltc": {"online": ltc_online, "offline": ltc_offline, "total": len(ltc_workers)},
-            "kas": {"online": kas_online, "offline": kas_offline, "total": len(kas_workers)},
-            "total": {"online": total_online, "offline": total_offline, "total": len(valid_workers)}
+            "ltc": {"online": ltc_online, "offline": ltc_offline, "total": ltc_online + ltc_offline},
+            "kas": {"online": kas_online, "offline": kas_offline, "total": kas_online + kas_offline},
+            "total": {"online": total_online, "offline": total_offline, "total": total_online + total_offline}
         },
-        "offline_workers": offline_workers,
-        "all_workers": valid_workers
+        "offline_details": offline_details,
+        "all_workers": all_worker_details
     }
 
 # Include the router

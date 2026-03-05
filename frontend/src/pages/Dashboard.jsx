@@ -283,34 +283,39 @@ const Dashboard = () => {
             </div>
 
             {/* Offline Workers Alert */}
-            {machineMonitor.offline_workers?.length > 0 && (
+            {machineMonitor.offline_details?.length > 0 && (
               <div className="bg-[#EF4444]/10 border border-[#EF4444]/30 rounded-xl p-4">
                 <div className="flex items-center gap-2 mb-3">
                   <AlertTriangle className="text-[#EF4444]" size={20} />
-                  <span className="font-bold text-[#EF4444]">Offline Machines ({machineMonitor.offline_workers.length})</span>
+                  <span className="font-bold text-[#EF4444]">
+                    Offline Machines ({machineMonitor.offline_details.reduce((sum, d) => sum + d.machines, 0)})
+                  </span>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
-                  {machineMonitor.offline_workers.map((worker, idx) => (
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                  {machineMonitor.offline_details.map((detail, idx) => (
                     <div key={idx} className="bg-[#0A0A0A] rounded-lg px-3 py-2 flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <WifiOff size={14} className="text-[#EF4444]" />
-                        <span className="text-sm text-white font-medium">{worker.name}</span>
+                        <div>
+                          <span className="text-sm text-white font-medium">{detail.worker}</span>
+                          <span className="text-xs text-[#EF4444] ml-2">({detail.machines} machines)</span>
+                        </div>
                       </div>
                       <span className={`text-xs px-2 py-0.5 rounded ${
-                        worker.coin === 'LTC' ? 'bg-gray-700 text-gray-300' : 'bg-teal-900 text-teal-300'
-                      }`}>{worker.coin}</span>
+                        detail.coin === 'LTC' ? 'bg-gray-700 text-gray-300' : 'bg-teal-900 text-teal-300'
+                      }`}>{detail.coin}</span>
                     </div>
                   ))}
                 </div>
               </div>
             )}
 
-            {machineMonitor.offline_workers?.length === 0 && (
+            {(!machineMonitor.offline_details || machineMonitor.offline_details.length === 0) && (
               <div className="bg-[#00E054]/10 border border-[#00E054]/30 rounded-xl p-4 flex items-center gap-3">
                 <Wifi className="text-[#00E054]" size={24} />
                 <div>
                   <span className="font-bold text-[#00E054]">All Machines Online</span>
-                  <p className="text-sm text-gray-500">No offline workers detected</p>
+                  <p className="text-sm text-gray-500">No offline machines detected</p>
                 </div>
               </div>
             )}
