@@ -1971,19 +1971,20 @@ async def get_machine_monitor(force_refresh: bool = False):
                 hashrate = int(w.get("hashrate_1hour", 0) or 0)
                 status = w.get("worker_status", "")
                 
-                # Only count as online if active with hashrate
-                is_online = hashrate > 0 or status == "active"
-                # Only show as offline if status is explicitly "offline" (not "invalid" or "inactive")
-                is_truly_offline = status == "offline"
+                # Machine is online ONLY if status is "active"
+                # "unactive", "inactive", "offline" all mean NOT online
+                is_online = status == "active"
+                # Show as offline if status is "offline" or "unactive" (recently stopped)
+                is_truly_offline = status in ["offline", "unactive"]
                 
                 if is_online:
                     ltc_online += 1
                     online_workers.append({"name": worker_name_viabtc, "coin": "LTC", "hashrate": hashrate})
                 elif is_truly_offline:
-                    # Only add to offline list if status is "offline"
+                    # Add to offline list
                     ltc_offline += 1
                     offline_workers.append({"name": worker_name_viabtc, "coin": "LTC", "status": status})
-                # Skip "invalid" and "inactive" workers - don't count them at all
+                # Skip "invalid" workers - don't count them at all
             
             # Process KAS workers
             for w in kas_workers:
@@ -1991,8 +1992,8 @@ async def get_machine_monitor(force_refresh: bool = False):
                 hashrate = int(w.get("hashrate_1hour", 0) or 0)
                 status = w.get("worker_status", "")
                 
-                is_online = hashrate > 0 or status == "active"
-                is_truly_offline = status == "offline"
+                is_online = status == "active"
+                is_truly_offline = status in ["offline", "unactive"]
                 
                 if is_online:
                     kas_online += 1
