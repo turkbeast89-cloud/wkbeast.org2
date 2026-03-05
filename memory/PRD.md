@@ -134,4 +134,4 @@ Build a crypto farming customer management app to:
 - **Frontend**: React + Tailwind CSS + Shadcn/UI
 - **Backend**: FastAPI (Python)
 - **Database**: MongoDB Atlas (Cloud)
-- **URL**: https://crypto-mine-manager.preview.emergentagent.com
+- **URL**: https://crypto-hash-track.preview.emergentagent.com
