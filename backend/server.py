@@ -1731,100 +1731,105 @@ async def auto_create_customer_accounts():
 # ==================== REAL-TIME MACHINE MONITORING ====================
 @api_router.get("/admin/machine-monitor")
 async def get_machine_monitor():
-    """Get real-time machine status from ViaBTC for admin dashboard"""
+    """Get real-time machine status by aggregating ALL customer workers from ViaBTC"""
     import aiohttp
     import hashlib
     import hmac
     import time
     from urllib.parse import urlencode
     
-    # Get main API settings
-    settings = await db.viabtc_settings.find_one({"id": "viabtc_settings"}, {"_id": 0})
-    if not settings or not settings.get("enabled"):
-        return {"success": False, "error": "ViaBTC integration not enabled"}
+    # Get all customer accounts with API keys
+    customer_accounts = await db.customer_accounts.find(
+        {"viabtc_api_key": {"$exists": True, "$ne": ""}},
+        {"_id": 0}
+    ).to_list(1000)
     
-    access_key = settings.get("access_key", "")
-    secret_key = settings.get("secret_key", "")
+    if not customer_accounts:
+        return {"success": False, "error": "No customer accounts with API keys found"}
     
-    if not access_key or not secret_key:
-        return {"success": False, "error": "API keys not configured"}
+    all_workers = []
+    processed_workers = set()  # To avoid duplicates
     
-    try:
-        all_workers = []
-        coins = ["LTC", "KAS"]
-        
-        async with aiohttp.ClientSession() as session:
-            for coin in coins:
-                tonce = str(int(time.time() * 1000))
-                params = {"coin": coin, "tonce": tonce}
-                query_string = urlencode(params)
-                
-                signature = hmac.new(
-                    secret_key.encode('utf-8'),
-                    query_string.encode('utf-8'),
-                    hashlib.sha256
-                ).hexdigest()
-                
-                headers = {
-                    "X-API-KEY": access_key,
-                    "X-SIGNATURE": signature
-                }
-                
-                url = f"https://pool.viabtc.com/res/openapi/v1/worker?{query_string}"
-                
+    async with aiohttp.ClientSession() as session:
+        for account in customer_accounts:
+            api_key = account.get("viabtc_api_key")
+            secret_key = account.get("viabtc_secret_key")
+            worker_name = account.get("worker_name", "unknown")
+            
+            if not api_key or not secret_key:
+                continue
+            
+            # Fetch workers for LTC and KAS
+            for coin in ["LTC", "KAS"]:
                 try:
-                    async with session.get(url, headers=headers, timeout=15) as resp:
+                    tonce = str(int(time.time() * 1000))
+                    params = {"coin": coin, "limit": 100, "tonce": tonce}
+                    query_string = urlencode(params)
+                    
+                    signature = hmac.new(
+                        secret_key.encode('utf-8'),
+                        query_string.encode('utf-8'),
+                        hashlib.sha256
+                    ).hexdigest()
+                    
+                    headers = {
+                        "X-API-KEY": api_key,
+                        "X-SIGNATURE": signature
+                    }
+                    
+                    url = f"https://pool.viabtc.com/res/openapi/v1/hashrate/worker?{query_string}"
+                    
+                    async with session.get(url, headers=headers, timeout=10) as resp:
                         data = await resp.json()
                         
                         if resp.status == 200 and data.get("code") == 0:
-                            workers_data = data.get("data", {})
-                            workers_list = workers_data.get("data", []) if isinstance(workers_data, dict) else workers_data
+                            workers = data.get("data", {}).get("data", [])
                             
-                            for worker in workers_list:
+                            for w in workers:
+                                worker_id = f"{w.get('name', '')}_{coin}"
+                                if worker_id in processed_workers:
+                                    continue
+                                processed_workers.add(worker_id)
+                                
                                 # Determine status
-                                hashrate = float(worker.get("hashrate", 0) or 0)
-                                hashrate_1h = float(worker.get("hashrate_1h", 0) or 0)
-                                status = "online" if hashrate > 0 or hashrate_1h > 0 else "offline"
+                                status = "online" if w.get("worker_status") == "active" else "offline"
                                 
                                 all_workers.append({
-                                    "name": worker.get("name", "Unknown"),
+                                    "name": w.get("name", "Unknown"),
                                     "coin": coin,
                                     "status": status,
-                                    "hashrate": hashrate,
-                                    "hashrate_1h": hashrate_1h,
-                                    "hashrate_unit": worker.get("hashrate_unit", "H/s")
+                                    "hashrate": w.get("hashrate_1h", 0),
+                                    "hashrate_unit": w.get("hashrate_unit", "H/s"),
+                                    "account": worker_name
                                 })
                 except Exception as e:
-                    print(f"Error fetching {coin} workers: {e}")
-        
-        # Calculate stats
-        ltc_workers = [w for w in all_workers if w["coin"] == "LTC"]
-        kas_workers = [w for w in all_workers if w["coin"] == "KAS"]
-        
-        ltc_online = len([w for w in ltc_workers if w["status"] == "online"])
-        ltc_offline = len([w for w in ltc_workers if w["status"] == "offline"])
-        kas_online = len([w for w in kas_workers if w["status"] == "online"])
-        kas_offline = len([w for w in kas_workers if w["status"] == "offline"])
-        
-        total_online = ltc_online + kas_online
-        total_offline = ltc_offline + kas_offline
-        
-        # Get offline workers for alert
-        offline_workers = [w for w in all_workers if w["status"] == "offline"]
-        
-        return {
-            "success": True,
-            "stats": {
-                "ltc": {"online": ltc_online, "offline": ltc_offline, "total": len(ltc_workers)},
-                "kas": {"online": kas_online, "offline": kas_offline, "total": len(kas_workers)},
-                "total": {"online": total_online, "offline": total_offline, "total": len(all_workers)}
-            },
-            "offline_workers": offline_workers,
-            "all_workers": all_workers
-        }
-        
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+                    print(f"Error fetching {coin} workers for {worker_name}: {e}")
+    
+    # Calculate stats
+    ltc_workers = [w for w in all_workers if w["coin"] == "LTC"]
+    kas_workers = [w for w in all_workers if w["coin"] == "KAS"]
+    
+    ltc_online = len([w for w in ltc_workers if w["status"] == "online"])
+    ltc_offline = len([w for w in ltc_workers if w["status"] == "offline"])
+    kas_online = len([w for w in kas_workers if w["status"] == "online"])
+    kas_offline = len([w for w in kas_workers if w["status"] == "offline"])
+    
+    total_online = ltc_online + kas_online
+    total_offline = ltc_offline + kas_offline
+    
+    # Get offline workers for alert
+    offline_workers = [w for w in all_workers if w["status"] == "offline"]
+    
+    return {
+        "success": True,
+        "stats": {
+            "ltc": {"online": ltc_online, "offline": ltc_offline, "total": len(ltc_workers)},
+            "kas": {"online": kas_online, "offline": kas_offline, "total": len(kas_workers)},
+            "total": {"online": total_online, "offline": total_offline, "total": len(all_workers)}
+        },
+        "offline_workers": offline_workers,
+        "all_workers": all_workers
+    }
 
 # Include the router
 app.include_router(api_router)
