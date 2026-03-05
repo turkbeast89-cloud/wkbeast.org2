@@ -1995,6 +1995,7 @@ async def get_machine_monitor():
     ltc_not_synced = 0
     kas_not_synced = 0
     offline_details = []
+    online_details = []  # NEW: track online machines
     not_synced_details = []
     all_worker_details = []
     
@@ -2016,6 +2017,14 @@ async def get_machine_monitor():
                 ltc_is_online = ltc_status.get("online", False)
                 if ltc_is_online:
                     ltc_online += ltc_machines
+                    online_details.append({
+                        "worker": display_name,
+                        "worker_name": worker_name,
+                        "coin": "LTC",
+                        "machines": ltc_machines,
+                        "active_workers": ltc_status.get("active_workers", 0),
+                        "hashrate": ltc_status.get("hashrate", 0)
+                    })
                 else:
                     ltc_offline += ltc_machines
                     offline_details.append({
@@ -2042,6 +2051,14 @@ async def get_machine_monitor():
                 kas_is_online = kas_status.get("online", False)
                 if kas_is_online:
                     kas_online += kas_machines
+                    online_details.append({
+                        "worker": display_name,
+                        "worker_name": worker_name,
+                        "coin": "KAS",
+                        "machines": kas_machines,
+                        "active_workers": kas_status.get("active_workers", 0),
+                        "hashrate": kas_status.get("hashrate", 0)
+                    })
                 else:
                     kas_offline += kas_machines
                     offline_details.append({
@@ -2081,6 +2098,7 @@ async def get_machine_monitor():
             "kas": {"online": kas_online, "offline": kas_offline, "not_synced": kas_not_synced, "total": kas_online + kas_offline},
             "total": {"online": total_online, "offline": total_offline, "not_synced": total_not_synced, "total": total_online + total_offline}
         },
+        "online_details": online_details,
         "offline_details": offline_details,
         "not_synced_details": not_synced_details,
         "all_workers": all_worker_details

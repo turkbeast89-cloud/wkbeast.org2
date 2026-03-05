@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { 
   DollarSign, TrendingUp, Users, Cpu, AlertCircle, 
   ArrowUpRight, ArrowDownRight, Pause, RefreshCw, Wifi, WifiOff,
-  AlertTriangle, Server
+  AlertTriangle, Server, ChevronDown, ChevronUp
 } from "lucide-react";
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, 
@@ -19,6 +19,7 @@ const Dashboard = () => {
   const [machineMonitor, setMachineMonitor] = useState(null);
   const [monitorLoading, setMonitorLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [showOnline, setShowOnline] = useState(false);  // Toggle for online machines
 
   useEffect(() => {
     fetchStats();
@@ -269,10 +270,15 @@ const Dashboard = () => {
                   )}
                 </div>
                 <div className="flex items-center justify-between">
-                  <div className="text-center">
+                  <div 
+                    className="text-center cursor-pointer hover:bg-[#00E054]/10 rounded-lg p-2 transition-colors"
+                    onClick={() => setShowOnline(!showOnline)}
+                    title="Click to view online machines"
+                  >
                     <div className="flex items-center gap-1 text-[#00E054]">
                       <Wifi size={16} />
                       <span className="text-2xl font-bold">{machineMonitor.stats.total.online}</span>
+                      {showOnline ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                     </div>
                     <p className="text-xs text-gray-500">Online</p>
                   </div>
@@ -290,6 +296,34 @@ const Dashboard = () => {
                 </div>
               </div>
             </div>
+
+            {/* Online Workers Details (Expandable) */}
+            {showOnline && machineMonitor.online_details?.length > 0 && (
+              <div className="bg-[#00E054]/10 border border-[#00E054]/30 rounded-xl p-4 mb-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Wifi className="text-[#00E054]" size={20} />
+                  <span className="font-bold text-[#00E054]">
+                    Online Machines ({machineMonitor.online_details.reduce((sum, d) => sum + d.machines, 0)})
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                  {machineMonitor.online_details.map((detail, idx) => (
+                    <div key={idx} className="bg-[#0A0A0A] rounded-lg px-3 py-2 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Wifi size={14} className="text-[#00E054]" />
+                        <div>
+                          <span className="text-sm text-white font-medium">{detail.worker}</span>
+                          <span className="text-xs text-[#00E054] ml-2">({detail.machines} machines)</span>
+                        </div>
+                      </div>
+                      <span className={`text-xs px-2 py-0.5 rounded ${
+                        detail.coin === 'LTC' ? 'bg-gray-700 text-gray-300' : 'bg-teal-900 text-teal-300'
+                      }`}>{detail.coin}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Offline Workers Alert */}
             {machineMonitor.offline_details?.length > 0 && (
