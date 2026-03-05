@@ -1697,6 +1697,85 @@ async def get_worker_status(worker_name: str, coin: str = "LTC", api_key: str = 
 
 # ==================== AUTO-CREATE CUSTOMER ACCOUNTS ====================
 
+@api_router.get("/admin/worker-mapping")
+async def get_worker_mapping():
+    """Get mapping between database worker_names and ViaBTC sub-accounts"""
+    # Get all ViaBTC sub-accounts
+    subaccounts_res = await get_viabtc_subaccounts()
+    viabtc_names = set()
+    if subaccounts_res.get("success"):
+        subaccounts_data = subaccounts_res.get("subaccounts", {})
+        subaccounts = subaccounts_data.get("data", []) if isinstance(subaccounts_data, dict) else subaccounts_data
+        viabtc_names = {s.get("account", "").lower() for s in subaccounts}
+    
+    # Get all customer accounts
+    customer_accounts = await db.customer_accounts.find({}, {"_id": 0}).to_list(1000)
+    customers = await db.customers.find({}, {"_id": 0}).to_list(1000)
+    customer_map = {c["id"]: c for c in customers}
+    
+    mapping = []
+    for acc in customer_accounts:
+        worker_name = acc.get("worker_name", "").lower()
+        customer = customer_map.get(acc.get("customer_id"), {})
+        
+        mapping.append({
+            "account_id": acc.get("id"),
+            "customer_name": customer.get("name", "Unknown"),
+            "current_worker_name": worker_name,
+            "has_api_key": bool(acc.get("viabtc_api_key")),
+            "matched_in_viabtc": worker_name in viabtc_names,
+            "suggested_matches": [v for v in viabtc_names if worker_name[:4] in v or v[:4] in worker_name] if not worker_name in viabtc_names else []
+        })
+    
+    unmatched = [m for m in mapping if not m["matched_in_viabtc"]]
+    matched = [m for m in mapping if m["matched_in_viabtc"]]
+    
+    return {
+        "total_accounts": len(mapping),
+        "matched": len(matched),
+        "unmatched": len(unmatched),
+        "unmatched_details": unmatched,
+        "viabtc_subaccounts": sorted(list(viabtc_names))
+    }
+
+@api_router.put("/admin/update-worker-name/{account_id}")
+async def update_worker_name(account_id: str, new_worker_name: str):
+    """Update a customer's worker_name to match ViaBTC"""
+    result = await db.customer_accounts.find_one_and_update(
+        {"id": account_id},
+        {"$set": {"worker_name": new_worker_name.lower().strip()}},
+        return_document=True,
+        projection={"_id": 0}
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Account not found")
+    
+    # Try to sync API keys for this account
+    await sync_viabtc_accounts()
+    
+    return {"success": True, "account": result}
+
+@api_router.post("/admin/bulk-update-worker-names")
+async def bulk_update_worker_names(updates: List[Dict]):
+    """Bulk update worker names. Format: [{"account_id": "xxx", "new_worker_name": "yyy"}, ...]"""
+    updated = []
+    for u in updates:
+        account_id = u.get("account_id")
+        new_name = u.get("new_worker_name", "").lower().strip()
+        if account_id and new_name:
+            result = await db.customer_accounts.update_one(
+                {"id": account_id},
+                {"$set": {"worker_name": new_name}}
+            )
+            if result.modified_count > 0:
+                updated.append(new_name)
+    
+    # Sync API keys
+    await sync_viabtc_accounts()
+    
+    return {"success": True, "updated": updated}
+
+
 @api_router.post("/auto-create-accounts")
 async def auto_create_customer_accounts():
     """Auto-create accounts for all customers without accounts"""
@@ -1731,22 +1810,22 @@ async def auto_create_customer_accounts():
 # ==================== REAL-TIME MACHINE MONITORING ====================
 @api_router.get("/admin/machine-monitor")
 async def get_machine_monitor():
-    """Get real-time MACHINE status by combining ViaBTC worker status with customer machine data"""
+    """Get real-time MACHINE status by querying EACH sub-account's API key"""
     import aiohttp
     import hashlib
     import hmac
     import time
     from urllib.parse import urlencode
     
-    # Get MAIN API settings (turkbeast - can see all sub-account workers)
+    # Get MAIN API settings
     settings = await db.viabtc_settings.find_one({"id": "viabtc_settings"}, {"_id": 0})
     if not settings or not settings.get("enabled"):
         return {"success": False, "error": "ViaBTC integration not enabled"}
     
-    api_key = settings.get("access_key", "")
-    secret_key = settings.get("secret_key", "")
+    main_api_key = settings.get("access_key", "")
+    main_secret_key = settings.get("secret_key", "")
     
-    if not api_key or not secret_key:
+    if not main_api_key or not main_secret_key:
         return {"success": False, "error": "Main API keys not configured"}
     
     # Get all customers with their machines
@@ -1755,16 +1834,23 @@ async def get_machine_monitor():
     machine_types = await db.machine_types.find({}, {"_id": 0}).to_list(100)
     machine_types_map = {mt["id"]: mt for mt in machine_types}
     
-    # Build customer_id -> worker_name map from customer_accounts
-    customer_to_worker = {}
+    # Build customer_id -> account map (with API keys)
+    customer_to_account = {}
     for acc in customer_accounts:
-        customer_to_worker[acc.get("customer_id")] = acc.get("worker_name", "").lower()
+        customer_to_account[acc.get("customer_id")] = acc
     
-    # Build worker_name -> machine count map
+    # Build worker_name -> machine count map AND collect API keys
     worker_machines = {}
+    worker_api_keys = {}  # worker_name -> (api_key, secret_key)
+    
     for c in customers:
-        # Get worker name from customer_accounts mapping
-        worker_name = customer_to_worker.get(c.get("id"), c.get("name", "").lower().replace(" ", ""))
+        account = customer_to_account.get(c.get("id"), {})
+        worker_name = account.get("worker_name", c.get("name", "").lower().replace(" ", "")).lower()
+        
+        # Store API keys for this worker (use sub-account keys if available, else main)
+        api_key = account.get("viabtc_api_key") or main_api_key
+        secret_key = account.get("viabtc_secret_key") or main_secret_key
+        worker_api_keys[worker_name] = (api_key, secret_key)
         
         machines = c.get("machines", [])
         
@@ -1797,67 +1883,109 @@ async def get_machine_monitor():
             worker_machines[worker_name]["kas_machines"] += kas_count
             worker_machines[worker_name]["details"].extend(machine_details)
     
-    # Fetch worker status from ViaBTC
-    worker_status_map = {}
-    
-    async with aiohttp.ClientSession() as session:
-        for coin in ["LTC", "KAS"]:
-            page = 1
-            has_more = True
-            
-            while has_more and page <= 10:
-                try:
-                    tonce = str(int(time.time() * 1000))
-                    params = {"coin": coin, "limit": 100, "page": page, "tonce": tonce}
-                    query_string = urlencode(params)
+    # Helper function to fetch workers for a specific API key
+    async def fetch_workers_for_account(session, api_key, secret_key, coin):
+        workers = []
+        page = 1
+        has_more = True
+        
+        while has_more and page <= 5:
+            try:
+                tonce = str(int(time.time() * 1000))
+                params = {"coin": coin, "limit": 100, "page": page, "tonce": tonce}
+                query_string = urlencode(params)
+                
+                signature = hmac.new(
+                    secret_key.encode('utf-8'),
+                    query_string.encode('utf-8'),
+                    hashlib.sha256
+                ).hexdigest()
+                
+                headers = {
+                    "X-API-KEY": api_key,
+                    "X-SIGNATURE": signature
+                }
+                
+                url = f"https://pool.viabtc.com/res/openapi/v1/hashrate/worker?{query_string}"
+                
+                async with session.get(url, headers=headers, timeout=10) as resp:
+                    data = await resp.json()
                     
-                    signature = hmac.new(
-                        secret_key.encode('utf-8'),
-                        query_string.encode('utf-8'),
-                        hashlib.sha256
-                    ).hexdigest()
-                    
-                    headers = {
-                        "X-API-KEY": api_key,
-                        "X-SIGNATURE": signature
-                    }
-                    
-                    url = f"https://pool.viabtc.com/res/openapi/v1/hashrate/worker?{query_string}"
-                    
-                    async with session.get(url, headers=headers, timeout=15) as resp:
-                        data = await resp.json()
-                        
-                        if resp.status == 200 and data.get("code") == 0:
-                            workers = data.get("data", {}).get("data", [])
-                            
-                            if not workers:
-                                has_more = False
-                                break
-                            
-                            for w in workers:
-                                worker_name = w.get("worker_name", "").lower()
-                                hashrate = int(w.get("hashrate_1hour", 0) or 0)
-                                worker_status = w.get("worker_status", "")
-                                is_online = hashrate > 0 or worker_status == "active"
-                                
-                                if worker_name not in worker_status_map:
-                                    worker_status_map[worker_name] = {}
-                                
-                                worker_status_map[worker_name][coin] = {
-                                    "online": is_online,
-                                    "hashrate": hashrate,
-                                    "status": worker_status
-                                }
-                            
-                            if len(workers) < 100:
+                    if resp.status == 200 and data.get("code") == 0:
+                        page_workers = data.get("data", {}).get("data", [])
+                        if not page_workers:
+                            has_more = False
+                        else:
+                            workers.extend(page_workers)
+                            if len(page_workers) < 100:
                                 has_more = False
                             else:
                                 page += 1
-                        else:
-                            has_more = False
-                except Exception as e:
-                    print(f"Error fetching {coin} workers page {page}: {e}")
-                    has_more = False
+                    else:
+                        has_more = False
+            except:
+                has_more = False
+        
+        return workers
+    
+    # Fetch worker status from ViaBTC using EACH account's API key
+    worker_status_map = {}  # worker_name -> {coin: {online, hashrate, worker_count}}
+    
+    async with aiohttp.ClientSession() as session:
+        # Query each unique API key
+        queried_keys = set()
+        
+        for worker_name, (api_key, secret_key) in worker_api_keys.items():
+            # Skip if we already queried this API key
+            if api_key in queried_keys:
+                continue
+            queried_keys.add(api_key)
+            
+            for coin in ["LTC", "KAS"]:
+                workers = await fetch_workers_for_account(session, api_key, secret_key, coin)
+                
+                # Count active workers and total hashrate for this account
+                active_count = sum(1 for w in workers if w.get("worker_status") == "active" or int(w.get("hashrate_1hour", 0) or 0) > 0)
+                total_hashrate = sum(int(w.get("hashrate_1hour", 0) or 0) for w in workers)
+                
+                # Find which worker_name this API key belongs to
+                for wn, (ak, _) in worker_api_keys.items():
+                    if ak == api_key:
+                        if wn not in worker_status_map:
+                            worker_status_map[wn] = {}
+                        
+                        worker_status_map[wn][coin] = {
+                            "online": active_count > 0,
+                            "active_workers": active_count,
+                            "total_workers": len(workers),
+                            "hashrate": total_hashrate
+                        }
+                        break
+        
+        # Also query main account for turkbeast workers
+        main_workers = await fetch_workers_for_account(session, main_api_key, main_secret_key, "LTC")
+        main_workers_kas = await fetch_workers_for_account(session, main_api_key, main_secret_key, "KAS")
+        
+        # Check if turkbeast is in worker_machines and update its status
+        if "turkbeast" in worker_machines:
+            ltc_active = sum(1 for w in main_workers if w.get("worker_status") == "active" or int(w.get("hashrate_1hour", 0) or 0) > 0)
+            kas_active = sum(1 for w in main_workers_kas if w.get("worker_status") == "active" or int(w.get("hashrate_1hour", 0) or 0) > 0)
+            
+            if "turkbeast" not in worker_status_map:
+                worker_status_map["turkbeast"] = {}
+            
+            worker_status_map["turkbeast"]["LTC"] = {
+                "online": ltc_active > 0,
+                "active_workers": ltc_active,
+                "total_workers": len(main_workers),
+                "hashrate": sum(int(w.get("hashrate_1hour", 0) or 0) for w in main_workers)
+            }
+            worker_status_map["turkbeast"]["KAS"] = {
+                "online": kas_active > 0,
+                "active_workers": kas_active,
+                "total_workers": len(main_workers_kas),
+                "hashrate": sum(int(w.get("hashrate_1hour", 0) or 0) for w in main_workers_kas)
+            }
     
     # Calculate actual machine stats
     ltc_online = 0
