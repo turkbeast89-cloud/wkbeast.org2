@@ -4,19 +4,29 @@ import { API } from "../App";
 import { toast } from "sonner";
 import { 
   DollarSign, TrendingUp, Users, Cpu, AlertCircle, 
-  ArrowUpRight, ArrowDownRight, Pause
+  ArrowUpRight, ArrowDownRight, Pause, RefreshCw, Wifi, WifiOff,
+  AlertTriangle, Server
 } from "lucide-react";
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, 
   ResponsiveContainer, PieChart, Pie, Cell, Legend 
 } from "recharts";
+import { Button } from "../components/ui/button";
 
 const Dashboard = () => {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [machineMonitor, setMachineMonitor] = useState(null);
+  const [monitorLoading, setMonitorLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     fetchStats();
+    fetchMachineMonitor();
+    
+    // Auto-refresh machine monitor every 60 seconds
+    const interval = setInterval(fetchMachineMonitor, 60000);
+    return () => clearInterval(interval);
   }, []);
 
   const fetchStats = async () => {
@@ -28,6 +38,25 @@ const Dashboard = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchMachineMonitor = async () => {
+    try {
+      const res = await axios.get(`${API}/admin/machine-monitor`);
+      if (res.data.success) {
+        setMachineMonitor(res.data);
+      }
+    } catch (e) {
+      console.error("Failed to load machine monitor");
+    } finally {
+      setMonitorLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  const handleRefreshMonitor = () => {
+    setRefreshing(true);
+    fetchMachineMonitor();
   };
 
   if (loading) {
@@ -134,6 +163,165 @@ const Dashboard = () => {
           icon={Users}
           color="secondary"
         />
+      </div>
+
+      {/* Real-Time Machine Monitor */}
+      <div className="bg-gradient-to-r from-[#0F0F0F] to-[#1A1A1A] rounded-xl border border-[#27272A] p-6">
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-[#00E054]/10">
+              <Server className="text-[#00E054]" size={24} />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-white">Real-Time Machine Monitor</h2>
+              <p className="text-sm text-gray-500">Live worker status from ViaBTC</p>
+            </div>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRefreshMonitor}
+            disabled={refreshing}
+            className="border-[#27272A] hover:bg-[#27272A]"
+          >
+            <RefreshCw size={14} className={`mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+        </div>
+
+        {monitorLoading ? (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {[1, 2, 3].map(i => <div key={i} className="skeleton h-32 rounded-xl" />)}
+          </div>
+        ) : machineMonitor?.success ? (
+          <>
+            {/* Machine Stats */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+              {/* LTC Miners */}
+              <div className="bg-[#0A0A0A] rounded-xl p-4 border border-gray-700/50">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-xl">💎</span>
+                  <span className="font-bold text-gray-300">LTC Miners</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="text-center">
+                    <div className="flex items-center gap-1 text-[#00E054]">
+                      <Wifi size={16} />
+                      <span className="text-2xl font-bold">{machineMonitor.stats.ltc.online}</span>
+                    </div>
+                    <p className="text-xs text-gray-500">Online</p>
+                  </div>
+                  <div className="text-center">
+                    <div className="flex items-center gap-1 text-[#EF4444]">
+                      <WifiOff size={16} />
+                      <span className="text-2xl font-bold">{machineMonitor.stats.ltc.offline}</span>
+                    </div>
+                    <p className="text-xs text-gray-500">Offline</p>
+                  </div>
+                  <div className="text-center">
+                    <span className="text-2xl font-bold text-white">{machineMonitor.stats.ltc.total}</span>
+                    <p className="text-xs text-gray-500">Total</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* KAS Miners */}
+              <div className="bg-[#0A0A0A] rounded-xl p-4 border border-teal-700/50">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-xl">🟢</span>
+                  <span className="font-bold text-teal-300">KAS Miners</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="text-center">
+                    <div className="flex items-center gap-1 text-[#00E054]">
+                      <Wifi size={16} />
+                      <span className="text-2xl font-bold">{machineMonitor.stats.kas.online}</span>
+                    </div>
+                    <p className="text-xs text-gray-500">Online</p>
+                  </div>
+                  <div className="text-center">
+                    <div className="flex items-center gap-1 text-[#EF4444]">
+                      <WifiOff size={16} />
+                      <span className="text-2xl font-bold">{machineMonitor.stats.kas.offline}</span>
+                    </div>
+                    <p className="text-xs text-gray-500">Offline</p>
+                  </div>
+                  <div className="text-center">
+                    <span className="text-2xl font-bold text-white">{machineMonitor.stats.kas.total}</span>
+                    <p className="text-xs text-gray-500">Total</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Total */}
+              <div className="bg-[#0A0A0A] rounded-xl p-4 border border-[#7C3AED]/50">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-xl">⚡</span>
+                  <span className="font-bold text-[#7C3AED]">All Miners</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="text-center">
+                    <div className="flex items-center gap-1 text-[#00E054]">
+                      <Wifi size={16} />
+                      <span className="text-2xl font-bold">{machineMonitor.stats.total.online}</span>
+                    </div>
+                    <p className="text-xs text-gray-500">Online</p>
+                  </div>
+                  <div className="text-center">
+                    <div className="flex items-center gap-1 text-[#EF4444]">
+                      <WifiOff size={16} />
+                      <span className="text-2xl font-bold">{machineMonitor.stats.total.offline}</span>
+                    </div>
+                    <p className="text-xs text-gray-500">Offline</p>
+                  </div>
+                  <div className="text-center">
+                    <span className="text-2xl font-bold text-white">{machineMonitor.stats.total.total}</span>
+                    <p className="text-xs text-gray-500">Total</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Offline Workers Alert */}
+            {machineMonitor.offline_workers?.length > 0 && (
+              <div className="bg-[#EF4444]/10 border border-[#EF4444]/30 rounded-xl p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <AlertTriangle className="text-[#EF4444]" size={20} />
+                  <span className="font-bold text-[#EF4444]">Offline Machines ({machineMonitor.offline_workers.length})</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                  {machineMonitor.offline_workers.map((worker, idx) => (
+                    <div key={idx} className="bg-[#0A0A0A] rounded-lg px-3 py-2 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <WifiOff size={14} className="text-[#EF4444]" />
+                        <span className="text-sm text-white font-medium">{worker.name}</span>
+                      </div>
+                      <span className={`text-xs px-2 py-0.5 rounded ${
+                        worker.coin === 'LTC' ? 'bg-gray-700 text-gray-300' : 'bg-teal-900 text-teal-300'
+                      }`}>{worker.coin}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {machineMonitor.offline_workers?.length === 0 && (
+              <div className="bg-[#00E054]/10 border border-[#00E054]/30 rounded-xl p-4 flex items-center gap-3">
+                <Wifi className="text-[#00E054]" size={24} />
+                <div>
+                  <span className="font-bold text-[#00E054]">All Machines Online</span>
+                  <p className="text-sm text-gray-500">No offline workers detected</p>
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="text-center py-8 text-gray-500">
+            <WifiOff size={48} className="mx-auto mb-4 opacity-50" />
+            <p>Could not load machine status</p>
+            <p className="text-sm mt-1">{machineMonitor?.error || "Check ViaBTC API settings"}</p>
+          </div>
+        )}
       </div>
 
       {/* Secondary Stats */}

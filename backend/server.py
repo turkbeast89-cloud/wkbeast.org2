@@ -1728,6 +1728,104 @@ async def auto_create_customer_accounts():
     
     return {"message": f"Created {created} accounts"}
 
+# ==================== REAL-TIME MACHINE MONITORING ====================
+@api_router.get("/admin/machine-monitor")
+async def get_machine_monitor():
+    """Get real-time machine status from ViaBTC for admin dashboard"""
+    import aiohttp
+    import hashlib
+    import hmac
+    import time
+    from urllib.parse import urlencode
+    
+    # Get main API settings
+    settings = await db.viabtc_settings.find_one({"id": "viabtc_settings"}, {"_id": 0})
+    if not settings or not settings.get("enabled"):
+        return {"success": False, "error": "ViaBTC integration not enabled"}
+    
+    access_key = settings.get("access_key", "")
+    secret_key = settings.get("secret_key", "")
+    
+    if not access_key or not secret_key:
+        return {"success": False, "error": "API keys not configured"}
+    
+    try:
+        all_workers = []
+        coins = ["LTC", "KAS"]
+        
+        async with aiohttp.ClientSession() as session:
+            for coin in coins:
+                tonce = str(int(time.time() * 1000))
+                params = {"coin": coin, "tonce": tonce}
+                query_string = urlencode(params)
+                
+                signature = hmac.new(
+                    secret_key.encode('utf-8'),
+                    query_string.encode('utf-8'),
+                    hashlib.sha256
+                ).hexdigest()
+                
+                headers = {
+                    "X-API-KEY": access_key,
+                    "X-SIGNATURE": signature
+                }
+                
+                url = f"https://pool.viabtc.com/res/openapi/v1/worker?{query_string}"
+                
+                try:
+                    async with session.get(url, headers=headers, timeout=15) as resp:
+                        data = await resp.json()
+                        
+                        if resp.status == 200 and data.get("code") == 0:
+                            workers_data = data.get("data", {})
+                            workers_list = workers_data.get("data", []) if isinstance(workers_data, dict) else workers_data
+                            
+                            for worker in workers_list:
+                                # Determine status
+                                hashrate = float(worker.get("hashrate", 0) or 0)
+                                hashrate_1h = float(worker.get("hashrate_1h", 0) or 0)
+                                status = "online" if hashrate > 0 or hashrate_1h > 0 else "offline"
+                                
+                                all_workers.append({
+                                    "name": worker.get("name", "Unknown"),
+                                    "coin": coin,
+                                    "status": status,
+                                    "hashrate": hashrate,
+                                    "hashrate_1h": hashrate_1h,
+                                    "hashrate_unit": worker.get("hashrate_unit", "H/s")
+                                })
+                except Exception as e:
+                    print(f"Error fetching {coin} workers: {e}")
+        
+        # Calculate stats
+        ltc_workers = [w for w in all_workers if w["coin"] == "LTC"]
+        kas_workers = [w for w in all_workers if w["coin"] == "KAS"]
+        
+        ltc_online = len([w for w in ltc_workers if w["status"] == "online"])
+        ltc_offline = len([w for w in ltc_workers if w["status"] == "offline"])
+        kas_online = len([w for w in kas_workers if w["status"] == "online"])
+        kas_offline = len([w for w in kas_workers if w["status"] == "offline"])
+        
+        total_online = ltc_online + kas_online
+        total_offline = ltc_offline + kas_offline
+        
+        # Get offline workers for alert
+        offline_workers = [w for w in all_workers if w["status"] == "offline"]
+        
+        return {
+            "success": True,
+            "stats": {
+                "ltc": {"online": ltc_online, "offline": ltc_offline, "total": len(ltc_workers)},
+                "kas": {"online": kas_online, "offline": kas_offline, "total": len(kas_workers)},
+                "total": {"online": total_online, "offline": total_offline, "total": len(all_workers)}
+            },
+            "offline_workers": offline_workers,
+            "all_workers": all_workers
+        }
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 # Include the router
 app.include_router(api_router)
 
