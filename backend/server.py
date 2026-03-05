@@ -1847,16 +1847,15 @@ async def get_machine_monitor(force_refresh: bool = False):
     customer_map = {c["id"]: c for c in customers}
     account_by_api_key = {}  # api_key -> account info
     
-    # Build a map of worker_name patterns to paused status
-    # This helps identify if a ViaBTC worker belongs to a paused customer
-    paused_worker_patterns = set()
-    for c in customers:
-        if c.get("status") == "paused":
-            name = c.get("name", "").lower().replace(" ", "")
-            paused_worker_patterns.add(name)
-            # Also add common variations
-            if len(name) > 3:
-                paused_worker_patterns.add(name[:4])  # First 4 chars
+    # Build a set of EXACT worker_names from customer_accounts that are paused
+    # These are the sub-accounts with their own API keys
+    paused_subaccount_names = set()
+    for acc in customer_accounts:
+        customer = customer_map.get(acc.get("customer_id"), {})
+        if customer.get("status") == "paused":
+            worker_name = acc.get("worker_name", "").lower()
+            if worker_name:
+                paused_subaccount_names.add(worker_name)
     
     for acc in customer_accounts:
         api_key = acc.get("viabtc_api_key")
@@ -1874,14 +1873,6 @@ async def get_machine_monitor(force_refresh: bool = False):
         "display_name": "turkbeast (Main)",
         "status": "active"
     }
-    
-    # Helper to check if a worker name belongs to a paused customer
-    def is_worker_paused(worker_name):
-        wn = worker_name.lower()
-        for pattern in paused_worker_patterns:
-            if pattern in wn or wn.startswith(pattern):
-                return True
-        return False
     
     # Helper function to fetch workers for a specific API key
     async def fetch_workers_for_account(session, api_key, secret_key, coin):
@@ -1979,32 +1970,34 @@ async def get_machine_monitor(force_refresh: bool = False):
                 worker_name_viabtc = w.get("worker_name", "")
                 hashrate = int(w.get("hashrate_1hour", 0) or 0)
                 status = w.get("worker_status", "")
-                is_online = hashrate > 0 or status == "active"
                 
-                if is_worker_paused(worker_name_viabtc):
-                    continue
+                # Only count as online if active with hashrate
+                is_online = hashrate > 0 or status == "active"
+                # Only show as offline if status is explicitly "offline" (not "invalid" or "inactive")
+                is_truly_offline = status == "offline"
                 
                 if is_online:
                     ltc_online += 1
                     online_workers.append({"name": worker_name_viabtc, "coin": "LTC", "hashrate": hashrate})
-                else:
+                elif is_truly_offline:
+                    # Only add to offline list if status is "offline"
                     ltc_offline += 1
                     offline_workers.append({"name": worker_name_viabtc, "coin": "LTC", "status": status})
+                # Skip "invalid" and "inactive" workers - don't count them at all
             
             # Process KAS workers
             for w in kas_workers:
                 worker_name_viabtc = w.get("worker_name", "")
                 hashrate = int(w.get("hashrate_1hour", 0) or 0)
                 status = w.get("worker_status", "")
-                is_online = hashrate > 0 or status == "active"
                 
-                if is_worker_paused(worker_name_viabtc):
-                    continue
+                is_online = hashrate > 0 or status == "active"
+                is_truly_offline = status == "offline"
                 
                 if is_online:
                     kas_online += 1
                     online_workers.append({"name": worker_name_viabtc, "coin": "KAS", "hashrate": hashrate})
-                else:
+                elif is_truly_offline:
                     kas_offline += 1
                     offline_workers.append({"name": worker_name_viabtc, "coin": "KAS", "status": status})
             
