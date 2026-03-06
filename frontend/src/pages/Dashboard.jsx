@@ -362,6 +362,28 @@ const Dashboard = () => {
                 </div>
               </div>
             )}
+
+            {/* API Errors Warning */}
+            {machineMonitor.api_errors?.length > 0 && (
+              <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-4 mt-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <AlertCircle className="text-yellow-500" size={20} />
+                  <span className="font-bold text-yellow-500">
+                    API Connection Issues ({machineMonitor.api_errors.length} accounts)
+                  </span>
+                </div>
+                <p className="text-sm text-gray-400 mb-2">
+                  Some accounts couldn't be fetched. Whitelist IP: <code className="bg-gray-800 px-2 py-0.5 rounded">{machineMonitor.server_ip}</code>
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {machineMonitor.api_errors.map((err, idx) => (
+                    <span key={idx} className="text-xs bg-yellow-900/50 text-yellow-300 px-2 py-1 rounded">
+                      {err.account}: {err.reason}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </>
         ) : (
           <div className="text-center py-8 text-gray-500">

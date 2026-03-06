@@ -1879,6 +1879,7 @@ async def get_machine_monitor(force_refresh: bool = False):
         workers = []
         page = 1
         has_more = True
+        api_error = None
         
         while has_more and page <= 5:
             try:
@@ -1912,12 +1913,19 @@ async def get_machine_monitor(force_refresh: bool = False):
                                 has_more = False
                             else:
                                 page += 1
-                    else:
+                    elif data.get("code") == 12004:
+                        # IP not allowed error
+                        api_error = "IP not whitelisted"
                         has_more = False
-            except:
+                    else:
+                        api_error = data.get("message", "API error")
+                        has_more = False
+            except Exception as e:
+                api_error = str(e)
                 has_more = False
         
-        return workers
+        # Return workers and any error info
+        return {"workers": workers, "error": api_error}
     
     # Collect unique API keys to query
     unique_api_keys = {}
@@ -1932,6 +1940,7 @@ async def get_machine_monitor(force_refresh: bool = False):
     
     # Fetch real worker data from ALL accounts in PARALLEL
     account_stats = []
+    api_errors = []  # Track which accounts have API errors
     
     ltc_total_online = 0
     ltc_total_offline = 0
@@ -1953,10 +1962,25 @@ async def get_machine_monitor(force_refresh: bool = False):
             worker_name = account_info["worker_name"]
             
             # Fetch LTC and KAS workers in parallel
-            ltc_workers, kas_workers = await asyncio.gather(
-                fetch_workers_for_account(session, api_key, secret_key, "LTC"),
-                fetch_workers_for_account(session, api_key, secret_key, "KAS")
-            )
+            try:
+                ltc_result, kas_result = await asyncio.gather(
+                    fetch_workers_for_account(session, api_key, secret_key, "LTC"),
+                    fetch_workers_for_account(session, api_key, secret_key, "KAS")
+                )
+            except Exception as e:
+                # Return error info
+                return {"error": True, "account": display_name, "worker_name": worker_name, "reason": str(e)}
+            
+            # Check if we got API errors
+            ltc_error = ltc_result.get("error") if isinstance(ltc_result, dict) else None
+            kas_error = kas_result.get("error") if isinstance(kas_result, dict) else None
+            
+            if ltc_error:
+                return {"error": True, "account": display_name, "worker_name": worker_name, "reason": ltc_error}
+            
+            # Extract workers from result
+            ltc_workers = ltc_result.get("workers", []) if isinstance(ltc_result, dict) else []
+            kas_workers = kas_result.get("workers", []) if isinstance(kas_result, dict) else []
             
             ltc_online = 0
             ltc_offline = 0
@@ -2025,6 +2049,15 @@ async def get_machine_monitor(force_refresh: bool = False):
         # Process results
         for result in results:
             if result:
+                # Check if this is an error result
+                if result.get("error"):
+                    api_errors.append({
+                        "account": result.get("account"),
+                        "worker_name": result.get("worker_name"),
+                        "reason": result.get("reason")
+                    })
+                    continue
+                
                 account_stats.append(result)
                 
                 ltc_total_online += result["ltc_online"]
@@ -2062,6 +2095,15 @@ async def get_machine_monitor(force_refresh: bool = False):
     total_online = ltc_total_online + kas_total_online
     total_offline = ltc_total_offline + kas_total_offline
     
+    # Get current server IP for error messages
+    try:
+        import aiohttp as aio_check
+        async with aio_check.ClientSession() as ip_session:
+            async with ip_session.get("https://api.ipify.org", timeout=5) as ip_resp:
+                server_ip = (await ip_resp.text()).strip()
+    except:
+        server_ip = "Run: curl ifconfig.me"
+    
     result = {
         "success": True,
         "stats": {
@@ -2072,6 +2114,8 @@ async def get_machine_monitor(force_refresh: bool = False):
         "accounts": account_stats,
         "online_details": all_online_details,
         "offline_details": all_offline_details,
+        "api_errors": api_errors,  # Show which accounts failed
+        "server_ip": server_ip,
         "cached_at": current_time
     }
     
