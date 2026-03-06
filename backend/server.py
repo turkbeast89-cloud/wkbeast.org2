@@ -1874,58 +1874,78 @@ async def get_machine_monitor(force_refresh: bool = False):
         "status": "active"
     }
     
-    # Helper function to fetch workers for a specific API key
-    async def fetch_workers_for_account(session, api_key, secret_key, coin):
+    # Helper function to fetch workers for a specific API key WITH RETRY
+    async def fetch_workers_for_account(session, api_key, secret_key, coin, max_retries=3):
         workers = []
         page = 1
         has_more = True
         api_error = None
         
         while has_more and page <= 5:
-            try:
-                tonce = str(int(time.time() * 1000))
-                params = {"coin": coin, "limit": 100, "page": page, "tonce": tonce}
-                query_string = urlencode(params)
-                
-                signature = hmac.new(
-                    secret_key.encode('utf-8'),
-                    query_string.encode('utf-8'),
-                    hashlib.sha256
-                ).hexdigest()
-                
-                headers = {
-                    "X-API-KEY": api_key,
-                    "X-SIGNATURE": signature
-                }
-                
-                url = f"https://pool.viabtc.com/res/openapi/v1/hashrate/worker?{query_string}"
-                
-                async with session.get(url, headers=headers, timeout=10) as resp:
-                    data = await resp.json()
+            success = False
+            
+            # Retry loop for each page
+            for attempt in range(max_retries):
+                try:
+                    tonce = str(int(time.time() * 1000))
+                    params = {"coin": coin, "limit": 100, "page": page, "tonce": tonce}
+                    query_string = urlencode(params)
                     
-                    if resp.status == 200 and data.get("code") == 0:
-                        page_workers = data.get("data", {}).get("data", [])
-                        if not page_workers:
-                            has_more = False
-                        else:
-                            workers.extend(page_workers)
-                            if len(page_workers) < 100:
+                    signature = hmac.new(
+                        secret_key.encode('utf-8'),
+                        query_string.encode('utf-8'),
+                        hashlib.sha256
+                    ).hexdigest()
+                    
+                    headers = {
+                        "X-API-KEY": api_key,
+                        "X-SIGNATURE": signature
+                    }
+                    
+                    url = f"https://pool.viabtc.com/res/openapi/v1/hashrate/worker?{query_string}"
+                    
+                    async with session.get(url, headers=headers, timeout=15) as resp:
+                        data = await resp.json()
+                        
+                        if resp.status == 200 and data.get("code") == 0:
+                            page_workers = data.get("data", {}).get("data", [])
+                            if not page_workers:
                                 has_more = False
                             else:
-                                page += 1
-                    elif data.get("code") == 12004:
-                        # IP not allowed error
-                        api_error = "IP not whitelisted"
-                        has_more = False
-                    else:
-                        api_error = data.get("message", "API error")
-                        has_more = False
-            except Exception as e:
-                api_error = str(e)
+                                workers.extend(page_workers)
+                                if len(page_workers) < 100:
+                                    has_more = False
+                                else:
+                                    page += 1
+                            success = True
+                            api_error = None
+                            break  # Success, exit retry loop
+                        elif data.get("code") == 12004:
+                            # IP not allowed error - no point retrying
+                            api_error = "IP not whitelisted"
+                            has_more = False
+                            success = True  # Don't retry IP errors
+                            break
+                        else:
+                            api_error = data.get("message", "API error")
+                            # Will retry
+                except asyncio.TimeoutError:
+                    api_error = "Timeout"
+                    # Will retry
+                except Exception as e:
+                    api_error = str(e)
+                    # Will retry
+                
+                # Wait before retry (exponential backoff)
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(0.5 * (attempt + 1))
+            
+            # If all retries failed, stop
+            if not success and api_error:
                 has_more = False
         
         # Return workers and any error info
-        return {"workers": workers, "error": api_error}
+        return {"workers": workers, "error": api_error if not workers else None}
     
     # Collect unique API keys to query
     unique_api_keys = {}
@@ -2041,10 +2061,22 @@ async def get_machine_monitor(force_refresh: bool = False):
                 }
             return None
         
-        # Execute ALL account fetches in parallel
+        # Execute account fetches in batches to avoid overwhelming ViaBTC API
         import asyncio
-        tasks = [fetch_account_data(api_key, secret_key) for api_key, secret_key in unique_api_keys.items()]
-        results = await asyncio.gather(*tasks)
+        
+        api_keys_list = list(unique_api_keys.items())
+        results = []
+        batch_size = 5  # Process 5 accounts at a time
+        
+        for i in range(0, len(api_keys_list), batch_size):
+            batch = api_keys_list[i:i + batch_size]
+            batch_tasks = [fetch_account_data(api_key, secret_key) for api_key, secret_key in batch]
+            batch_results = await asyncio.gather(*batch_tasks)
+            results.extend(batch_results)
+            
+            # Small delay between batches to avoid rate limiting
+            if i + batch_size < len(api_keys_list):
+                await asyncio.sleep(0.2)
         
         # Process results
         for result in results:
