@@ -20,6 +20,25 @@ const Dashboard = () => {
   const [monitorLoading, setMonitorLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [showOnline, setShowOnline] = useState(false);  // Toggle for online machines
+  const [expandedAccount, setExpandedAccount] = useState(null);  // Track which account is expanded
+
+  // Helper to format hashrate
+  const formatHashrate = (hashrate, coin) => {
+    if (!hashrate) return "0 H/s";
+    if (coin === "KAS") {
+      // KAS uses TH/s scale
+      if (hashrate >= 1e12) return (hashrate / 1e12).toFixed(2) + " TH/s";
+      if (hashrate >= 1e9) return (hashrate / 1e9).toFixed(2) + " GH/s";
+      if (hashrate >= 1e6) return (hashrate / 1e6).toFixed(2) + " MH/s";
+      return hashrate.toFixed(0) + " H/s";
+    } else {
+      // LTC uses GH/s scale  
+      if (hashrate >= 1e12) return (hashrate / 1e12).toFixed(2) + " TH/s";
+      if (hashrate >= 1e9) return (hashrate / 1e9).toFixed(2) + " GH/s";
+      if (hashrate >= 1e6) return (hashrate / 1e6).toFixed(2) + " MH/s";
+      return hashrate.toFixed(0) + " H/s";
+    }
+  };
 
   useEffect(() => {
     fetchStats();
@@ -307,20 +326,51 @@ const Dashboard = () => {
                   </span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
-                  {machineMonitor.online_details.map((detail, idx) => (
-                    <div key={idx} className="bg-[#0A0A0A] rounded-lg px-3 py-2 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Wifi size={14} className="text-[#00E054]" />
-                        <div>
-                          <span className="text-sm text-white font-medium">{detail.worker}</span>
-                          <span className="text-xs text-[#00E054] ml-2">({detail.machines} machines)</span>
+                  {machineMonitor.online_details.map((detail, idx) => {
+                    const accountKey = `${detail.worker_name}-${detail.coin}`;
+                    const isExpanded = expandedAccount === accountKey;
+                    
+                    return (
+                      <div key={idx} className="bg-[#0A0A0A] rounded-lg overflow-hidden">
+                        {/* Account Header - Clickable */}
+                        <div 
+                          className="px-3 py-2 flex items-center justify-between cursor-pointer hover:bg-[#1A1A1A] transition-colors"
+                          onClick={() => setExpandedAccount(isExpanded ? null : accountKey)}
+                        >
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <Wifi size={14} className="text-[#00E054] flex-shrink-0" />
+                            <div className="min-w-0">
+                              <span className="text-sm text-white font-medium truncate block">{detail.worker}</span>
+                              <div className="flex items-center gap-2 text-xs">
+                                <span className="text-[#00E054]">({detail.machines})</span>
+                                <span className="text-yellow-400">{formatHashrate(detail.hashrate, detail.coin)}</span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            <span className={`text-xs px-2 py-0.5 rounded ${
+                              detail.coin === 'LTC' ? 'bg-gray-700 text-gray-300' : 'bg-teal-900 text-teal-300'
+                            }`}>{detail.coin}</span>
+                            {detail.workers?.length > 0 && (
+                              isExpanded ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />
+                            )}
+                          </div>
                         </div>
+                        
+                        {/* Expanded Workers List */}
+                        {isExpanded && detail.workers?.length > 0 && (
+                          <div className="border-t border-gray-800 bg-[#050505] px-2 py-2 max-h-48 overflow-y-auto">
+                            {detail.workers.map((w, wIdx) => (
+                              <div key={wIdx} className="flex items-center justify-between py-1 px-2 text-xs hover:bg-[#0A0A0A] rounded">
+                                <span className="text-gray-300 truncate">{w.name}</span>
+                                <span className="text-yellow-400 ml-2 flex-shrink-0">{formatHashrate(w.hashrate, detail.coin)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                      <span className={`text-xs px-2 py-0.5 rounded ${
-                        detail.coin === 'LTC' ? 'bg-gray-700 text-gray-300' : 'bg-teal-900 text-teal-300'
-                      }`}>{detail.coin}</span>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}

@@ -2047,6 +2047,10 @@ async def get_machine_monitor(force_refresh: bool = False):
                     offline_workers.append({"name": worker_name_viabtc, "coin": "KAS", "status": status})
             
             if ltc_online + ltc_offline + kas_online + kas_offline > 0:
+                # Calculate total hashrates
+                ltc_hashrate = sum(w["hashrate"] for w in online_workers if w["coin"] == "LTC")
+                kas_hashrate = sum(w["hashrate"] for w in online_workers if w["coin"] == "KAS")
+                
                 return {
                     "account": display_name,
                     "worker_name": worker_name,
@@ -2054,6 +2058,8 @@ async def get_machine_monitor(force_refresh: bool = False):
                     "ltc_offline": ltc_offline,
                     "kas_online": kas_online,
                     "kas_offline": kas_offline,
+                    "ltc_hashrate": ltc_hashrate,
+                    "kas_hashrate": kas_hashrate,
                     "total_online": ltc_online + kas_online,
                     "total_offline": ltc_offline + kas_offline,
                     "offline_workers": offline_workers,
@@ -2101,18 +2107,26 @@ async def get_machine_monitor(force_refresh: bool = False):
                 worker_name = result["worker_name"]
                 
                 if result["ltc_online"] > 0:
+                    # Get LTC workers from online_workers
+                    ltc_workers = [w for w in result.get("online_workers", []) if w["coin"] == "LTC"]
                     all_online_details.append({
                         "worker": display_name,
                         "worker_name": worker_name,
                         "coin": "LTC",
-                        "machines": result["ltc_online"]
+                        "machines": result["ltc_online"],
+                        "hashrate": result.get("ltc_hashrate", 0),
+                        "workers": ltc_workers
                     })
                 if result["kas_online"] > 0:
+                    # Get KAS workers from online_workers
+                    kas_workers = [w for w in result.get("online_workers", []) if w["coin"] == "KAS"]
                     all_online_details.append({
                         "worker": display_name,
                         "worker_name": worker_name,
                         "coin": "KAS",
-                        "machines": result["kas_online"]
+                        "machines": result["kas_online"],
+                        "hashrate": result.get("kas_hashrate", 0),
+                        "workers": kas_workers
                     })
                 
                 for ow in result["offline_workers"]:
