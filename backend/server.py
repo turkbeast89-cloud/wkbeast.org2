@@ -23,6 +23,13 @@ mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
+# Proxy for outbound API calls (ViaBTC requires static IP whitelisting)
+PROXY_URL = os.environ.get('PROXY_URL', '')
+
+def _proxy():
+    """Return proxy URL for aiohttp requests, or None if not set"""
+    return PROXY_URL if PROXY_URL else None
+
 # Simple cache for machine monitor (30 second TTL)
 _machine_monitor_cache = {"data": None, "timestamp": 0}
 CACHE_TTL = 30  # seconds
@@ -189,9 +196,9 @@ async def get_server_ip():
     import aiohttp
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get("https://api.ipify.org", timeout=5) as resp:
+            async with session.get("https://api.ipify.org", timeout=5, proxy=_proxy()) as resp:
                 ip = (await resp.text()).strip()
-                return {"ip": ip, "message": f"Whitelist this IP in ViaBTC: {ip}"}
+                return {"ip": ip, "message": f"Whitelist this IP in ViaBTC: {ip}", "proxy_enabled": bool(PROXY_URL)}
     except:
         return {"ip": "unknown", "message": "Could not fetch IP. Try: curl https://api.ipify.org"}
 
@@ -1150,7 +1157,7 @@ async def test_viabtc_connection():
         # Get server IP first
         try:
             async with aiohttp.ClientSession() as ip_session:
-                async with ip_session.get("https://api.ipify.org", timeout=5) as ip_resp:
+                async with ip_session.get("https://api.ipify.org", timeout=5, proxy=_proxy()) as ip_resp:
                     server_ip = (await ip_resp.text()).strip()
         except:
             server_ip = "unknown"
@@ -1158,7 +1165,7 @@ async def test_viabtc_connection():
         # Increase timeout and add retry
         timeout = aiohttp.ClientTimeout(total=30, connect=15)
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(url, headers=headers) as resp:
+            async with session.get(url, headers=headers, proxy=_proxy()) as resp:
                 data = await resp.json()
                 
                 if resp.status == 200 and data.get("code") == 0:
@@ -1183,7 +1190,7 @@ async def test_viabtc_connection():
         # Get server IP for error message
         try:
             async with aiohttp.ClientSession() as ip_session:
-                async with ip_session.get("https://api.ipify.org", timeout=5) as ip_resp:
+                async with ip_session.get("https://api.ipify.org", timeout=5, proxy=_proxy()) as ip_resp:
                     server_ip = (await ip_resp.text()).strip()
         except:
             server_ip = "unknown"
@@ -1198,7 +1205,7 @@ async def test_viabtc_connection():
         # Get server IP for error message
         try:
             async with aiohttp.ClientSession() as ip_session:
-                async with ip_session.get("https://api.ipify.org", timeout=5) as ip_resp:
+                async with ip_session.get("https://api.ipify.org", timeout=5, proxy=_proxy()) as ip_resp:
                     server_ip = (await ip_resp.text()).strip()
         except:
             server_ip = "unknown"
@@ -1250,7 +1257,7 @@ async def get_viabtc_earnings(coin: str = "LTC"):
         url = f"https://pool.viabtc.com/res/openapi/v1/profit?{query_string}"
         
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, timeout=15) as resp:
+            async with session.get(url, headers=headers, timeout=15, proxy=_proxy()) as resp:
                 data = await resp.json()
                 
                 if resp.status == 200 and data.get("code") == 0:
@@ -1320,7 +1327,7 @@ async def get_customer_earnings(account_id: str):
             account_url = f"https://pool.viabtc.com/res/openapi/v1/account?{query_string}"
             
             try:
-                async with session.get(account_url, headers=headers, timeout=10) as resp:
+                async with session.get(account_url, headers=headers, timeout=10, proxy=_proxy()) as resp:
                     data = await resp.json()
                     if resp.status == 200 and data.get("code") == 0:
                         balance_list = data.get("data", {}).get("balance", [])
@@ -1353,7 +1360,7 @@ async def get_customer_earnings(account_id: str):
                 url = f"https://pool.viabtc.com/res/openapi/v1/profit?{query_string}"
                 
                 try:
-                    async with session.get(url, headers=headers, timeout=10) as resp:
+                    async with session.get(url, headers=headers, timeout=10, proxy=_proxy()) as resp:
                         data = await resp.json()
                         
                         if resp.status == 200 and data.get("code") == 0:
@@ -1429,7 +1436,7 @@ async def get_viabtc_subaccounts():
         url = f"https://pool.viabtc.com/res/openapi/v1/account/sub?{query_string}"
         
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, timeout=15) as resp:
+            async with session.get(url, headers=headers, timeout=15, proxy=_proxy()) as resp:
                 data = await resp.json()
                 
                 if resp.status == 200 and data.get("code") == 0:
@@ -1566,7 +1573,7 @@ async def get_viabtc_workers(coin: str = "LTC"):
         url = f"https://pool.viabtc.com/res/openapi/v1/hashrate/worker?{query_string}"
         
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, timeout=15) as resp:
+            async with session.get(url, headers=headers, timeout=15, proxy=_proxy()) as resp:
                 data = await resp.json()
                 
                 if resp.status == 200 and data.get("code") == 0:
@@ -1638,7 +1645,7 @@ async def get_customer_workers(customer_account_id: str):
                 
                 url = f"https://pool.viabtc.com/res/openapi/v1/hashrate/worker?{query_string}"
                 
-                async with session.get(url, headers=headers, timeout=15) as resp:
+                async with session.get(url, headers=headers, timeout=15, proxy=_proxy()) as resp:
                     data = await resp.json()
                     
                     if resp.status == 200 and data.get("code") == 0:
@@ -1697,7 +1704,7 @@ async def get_viabtc_hashrate(coin: str = "LTC"):
         url = f"https://pool.viabtc.com/res/openapi/v1/hashrate?{query_string}"
         
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, timeout=15) as resp:
+            async with session.get(url, headers=headers, timeout=15, proxy=_proxy()) as resp:
                 data = await resp.json()
                 
                 if resp.status == 200 and data.get("code") == 0:
@@ -1756,7 +1763,7 @@ async def get_worker_status(worker_name: str, coin: str = "LTC", api_key: str = 
         url = f"https://pool.viabtc.com/res/openapi/v1/hashrate/worker?{query_string}"
         
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, timeout=15) as resp:
+            async with session.get(url, headers=headers, timeout=15, proxy=_proxy()) as resp:
                 data = await resp.json()
                 
                 if resp.status == 200 and data.get("code") == 0:
@@ -1950,7 +1957,7 @@ async def get_machine_monitor_watcher(force_refresh: bool = False):
         """Fetch workers from ViaBTC watcher link"""
         try:
             url = f"https://www.viabtc.com/res/openapi/v1/observer/worker?access_key={watcher_key}&coin={coin}"
-            async with session.get(url, timeout=15) as resp:
+            async with session.get(url, timeout=15, proxy=_proxy()) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     if data.get("code") == 0:
@@ -2199,7 +2206,7 @@ async def get_machine_monitor(force_refresh: bool = False):
                     
                     url = f"https://pool.viabtc.com/res/openapi/v1/hashrate/worker?{query_string}"
                     
-                    async with session.get(url, headers=headers, timeout=15) as resp:
+                    async with session.get(url, headers=headers, timeout=15, proxy=_proxy()) as resp:
                         data = await resp.json()
                         
                         if resp.status == 200 and data.get("code") == 0:
@@ -2440,7 +2447,7 @@ async def get_machine_monitor(force_refresh: bool = False):
     try:
         import aiohttp as aio_check
         async with aio_check.ClientSession() as ip_session:
-            async with ip_session.get("https://api.ipify.org", timeout=5) as ip_resp:
+            async with ip_session.get("https://api.ipify.org", timeout=5, proxy=_proxy()) as ip_resp:
                 server_ip = (await ip_resp.text()).strip()
     except:
         server_ip = "Run: curl ifconfig.me"
