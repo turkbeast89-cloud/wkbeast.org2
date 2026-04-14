@@ -62,8 +62,18 @@ const Dashboard = () => {
 
   const fetchMachineMonitor = async (forceRefresh = false) => {
     try {
-      const res = await axios.get(`${API}/admin/machine-monitor${forceRefresh ? '?force_refresh=true' : ''}`);
+      // Try watcher-based endpoint first (no IP whitelist needed)
+      let res = await axios.get(`${API}/admin/machine-monitor-watcher${forceRefresh ? '?force_refresh=true' : ''}`);
+      
+      // If watcher fails or has no data, fall back to API-based endpoint
+      if (!res.data.success && res.data.error === "No watcher keys configured") {
+        res = await axios.get(`${API}/admin/machine-monitor${forceRefresh ? '?force_refresh=true' : ''}`);
+      }
+      
       if (res.data.success) {
+        setMachineMonitor(res.data);
+      } else {
+        // Still show the error
         setMachineMonitor(res.data);
       }
     } catch (e) {

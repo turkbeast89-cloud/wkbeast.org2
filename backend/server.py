@@ -926,6 +926,29 @@ async def delete_customer_account(account_id: str):
         raise HTTPException(status_code=404, detail="Account not found")
     return {"message": "Deleted"}
 
+@api_router.put("/customer-accounts/{account_id}/watcher")
+async def update_watcher_key(account_id: str, watcher_url: str):
+    """Save watcher link for a customer account. Extract access_key from URL."""
+    import re
+    
+    # Extract access_key from watcher URL
+    # URL format: https://www.viabtc.com/en/observer/worker?access_key=xxx&coin=LTC
+    match = re.search(r'access_key=([a-f0-9]+)', watcher_url)
+    if not match:
+        raise HTTPException(status_code=400, detail="Invalid watcher URL. Could not find access_key.")
+    
+    watcher_key = match.group(1)
+    
+    result = await db.customer_accounts.find_one_and_update(
+        {"id": account_id},
+        {"$set": {"watcher_key": watcher_key}},
+        return_document=True,
+        projection={"_id": 0}
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Account not found")
+    return {"success": True, "watcher_key": watcher_key}
+
 # ==================== MAINTENANCE LOGS ====================
 
 @api_router.get("/maintenance-logs")
@@ -1038,19 +1061,48 @@ async def get_viabtc_settings():
     return settings
 
 @api_router.put("/viabtc-settings")
-async def update_viabtc_settings(access_key: str = "", secret_key: str = "", enabled: bool = False):
+async def update_viabtc_settings(access_key: str = "", secret_key: str = "", enabled: bool = False, watcher_key: str = ""):
+    """Update ViaBTC settings including optional watcher key for main account"""
+    update_data = {
+        "access_key": access_key,
+        "secret_key": secret_key,
+        "enabled": enabled
+    }
+    if watcher_key:
+        # Extract access_key from watcher URL if full URL provided
+        import re
+        match = re.search(r'access_key=([a-f0-9]+)', watcher_key)
+        update_data["watcher_key"] = match.group(1) if match else watcher_key
+    
     result = await db.viabtc_settings.find_one_and_update(
         {"id": "viabtc_settings"},
-        {"$set": {
-            "access_key": access_key,
-            "secret_key": secret_key,
-            "enabled": enabled
-        }},
+        {"$set": update_data},
         upsert=True,
         return_document=True,
         projection={"_id": 0}
     )
     return result
+
+@api_router.put("/viabtc-watcher")
+async def update_main_watcher_key(watcher_url: str):
+    """Save watcher link for main account"""
+    import re
+    
+    # Extract access_key from watcher URL
+    match = re.search(r'access_key=([a-f0-9]+)', watcher_url)
+    if not match:
+        raise HTTPException(status_code=400, detail="Invalid watcher URL. Could not find access_key.")
+    
+    watcher_key = match.group(1)
+    
+    result = await db.viabtc_settings.find_one_and_update(
+        {"id": "viabtc_settings"},
+        {"$set": {"watcher_key": watcher_key}},
+        upsert=True,
+        return_document=True,
+        projection={"_id": 0}
+    )
+    return {"success": True, "watcher_key": watcher_key}
 
 @api_router.post("/viabtc-test")
 async def test_viabtc_connection():
@@ -1837,7 +1889,226 @@ async def auto_create_customer_accounts():
     
     return {"message": f"Created {created} accounts"}
 
-# ==================== REAL-TIME MACHINE MONITORING ====================
+# ==================== WATCHER-BASED MACHINE MONITORING ====================
+# Cache for watcher monitor
+_watcher_monitor_cache = {"data": None, "timestamp": 0}
+
+@api_router.get("/admin/machine-monitor-watcher")
+async def get_machine_monitor_watcher(force_refresh: bool = False):
+    """Get real-time MACHINE status using watcher links (no IP whitelist needed)"""
+    global _watcher_monitor_cache
+    import aiohttp
+    
+    # Check cache first (unless force refresh)
+    current_time = time.time()
+    if not force_refresh and _watcher_monitor_cache["data"] and (current_time - _watcher_monitor_cache["timestamp"]) < CACHE_TTL:
+        return _watcher_monitor_cache["data"]
+    
+    # Get customer accounts with watcher keys
+    customer_accounts = await db.customer_accounts.find({}, {"_id": 0}).to_list(1000)
+    customers = await db.customers.find({}, {"_id": 0}).to_list(1000)
+    
+    # Get main account watcher key from settings
+    settings = await db.viabtc_settings.find_one({"id": "viabtc_settings"}, {"_id": 0})
+    main_watcher_key = settings.get("watcher_key") if settings else None
+    
+    # Build customer map
+    customer_map = {c["id"]: c for c in customers}
+    
+    # Collect accounts with watcher keys
+    accounts_to_fetch = []
+    for acc in customer_accounts:
+        watcher_key = acc.get("watcher_key")
+        if watcher_key:
+            customer = customer_map.get(acc.get("customer_id"), {})
+            if customer.get("status") != "paused":  # Skip paused accounts
+                accounts_to_fetch.append({
+                    "watcher_key": watcher_key,
+                    "worker_name": acc.get("worker_name", ""),
+                    "display_name": customer.get("name", acc.get("worker_name", "")),
+                    "account_id": acc.get("id")
+                })
+    
+    # Add main account if it has watcher key
+    if main_watcher_key:
+        accounts_to_fetch.append({
+            "watcher_key": main_watcher_key,
+            "worker_name": "turkbeast",
+            "display_name": "turkbeast (Main)",
+            "account_id": "main"
+        })
+    
+    if not accounts_to_fetch:
+        return {
+            "success": False,
+            "error": "No watcher keys configured",
+            "message": "Add watcher links to customer accounts in Admin Panel"
+        }
+    
+    # Fetch worker data from watcher links
+    async def fetch_workers_from_watcher(session, watcher_key, coin):
+        """Fetch workers from ViaBTC watcher link"""
+        try:
+            url = f"https://www.viabtc.com/res/openapi/v1/observer/worker?access_key={watcher_key}&coin={coin}"
+            async with session.get(url, timeout=15) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if data.get("code") == 0:
+                        return {"workers": data.get("data", {}).get("data", []), "error": None}
+                    else:
+                        return {"workers": [], "error": data.get("message", "API error")}
+                else:
+                    return {"workers": [], "error": f"HTTP {resp.status}"}
+        except Exception as e:
+            return {"workers": [], "error": str(e)}
+    
+    account_stats = []
+    api_errors = []
+    
+    ltc_total_online = 0
+    ltc_total_offline = 0
+    kas_total_online = 0
+    kas_total_offline = 0
+    all_online_details = []
+    all_offline_details = []
+    
+    async with aiohttp.ClientSession() as session:
+        for acc_info in accounts_to_fetch:
+            watcher_key = acc_info["watcher_key"]
+            display_name = acc_info["display_name"]
+            worker_name = acc_info["worker_name"]
+            
+            # Fetch LTC and KAS workers
+            ltc_result = await fetch_workers_from_watcher(session, watcher_key, "LTC")
+            kas_result = await fetch_workers_from_watcher(session, watcher_key, "KAS")
+            
+            # Check for errors
+            if ltc_result["error"] and kas_result["error"]:
+                api_errors.append({
+                    "account": display_name,
+                    "worker_name": worker_name,
+                    "reason": ltc_result["error"]
+                })
+                continue
+            
+            ltc_online = 0
+            ltc_offline = 0
+            kas_online = 0
+            kas_offline = 0
+            offline_workers = []
+            online_workers = []
+            
+            # Process LTC workers
+            for w in ltc_result.get("workers", []):
+                worker_name_viabtc = w.get("worker_name", "")
+                hashrate = int(w.get("hashrate_1hour", 0) or 0)
+                status = w.get("worker_status", "")
+                
+                is_online = status == "active"
+                is_truly_offline = status in ["offline", "unactive"]
+                
+                if is_online:
+                    ltc_online += 1
+                    online_workers.append({"name": worker_name_viabtc, "coin": "LTC", "hashrate": hashrate})
+                elif is_truly_offline:
+                    ltc_offline += 1
+                    offline_workers.append({"name": worker_name_viabtc, "coin": "LTC", "status": status})
+            
+            # Process KAS workers
+            for w in kas_result.get("workers", []):
+                worker_name_viabtc = w.get("worker_name", "")
+                hashrate = int(w.get("hashrate_1hour", 0) or 0)
+                status = w.get("worker_status", "")
+                
+                is_online = status == "active"
+                is_truly_offline = status in ["offline", "unactive"]
+                
+                if is_online:
+                    kas_online += 1
+                    online_workers.append({"name": worker_name_viabtc, "coin": "KAS", "hashrate": hashrate})
+                elif is_truly_offline:
+                    kas_offline += 1
+                    offline_workers.append({"name": worker_name_viabtc, "coin": "KAS", "status": status})
+            
+            if ltc_online + ltc_offline + kas_online + kas_offline > 0:
+                ltc_hashrate = sum(w["hashrate"] for w in online_workers if w["coin"] == "LTC")
+                kas_hashrate = sum(w["hashrate"] for w in online_workers if w["coin"] == "KAS")
+                
+                account_stats.append({
+                    "account": display_name,
+                    "worker_name": worker_name,
+                    "ltc_online": ltc_online,
+                    "ltc_offline": ltc_offline,
+                    "kas_online": kas_online,
+                    "kas_offline": kas_offline,
+                    "ltc_hashrate": ltc_hashrate,
+                    "kas_hashrate": kas_hashrate,
+                    "total_online": ltc_online + kas_online,
+                    "total_offline": ltc_offline + kas_offline,
+                    "offline_workers": offline_workers,
+                    "online_workers": online_workers
+                })
+                
+                ltc_total_online += ltc_online
+                ltc_total_offline += ltc_offline
+                kas_total_online += kas_online
+                kas_total_offline += kas_offline
+                
+                if ltc_online > 0:
+                    ltc_workers_list = [w for w in online_workers if w["coin"] == "LTC"]
+                    all_online_details.append({
+                        "worker": display_name,
+                        "worker_name": worker_name,
+                        "coin": "LTC",
+                        "machines": ltc_online,
+                        "hashrate": ltc_hashrate,
+                        "workers": ltc_workers_list
+                    })
+                if kas_online > 0:
+                    kas_workers_list = [w for w in online_workers if w["coin"] == "KAS"]
+                    all_online_details.append({
+                        "worker": display_name,
+                        "worker_name": worker_name,
+                        "coin": "KAS",
+                        "machines": kas_online,
+                        "hashrate": kas_hashrate,
+                        "workers": kas_workers_list
+                    })
+                
+                for ow in offline_workers:
+                    all_offline_details.append({
+                        "worker": display_name,
+                        "worker_name": worker_name,
+                        "machine_name": ow["name"],
+                        "coin": ow["coin"],
+                        "reason": ow.get("status", "offline")
+                    })
+    
+    total_online = ltc_total_online + kas_total_online
+    total_offline = ltc_total_offline + kas_total_offline
+    
+    result = {
+        "success": True,
+        "mode": "watcher",
+        "stats": {
+            "ltc": {"online": ltc_total_online, "offline": ltc_total_offline, "total": ltc_total_online + ltc_total_offline},
+            "kas": {"online": kas_total_online, "offline": kas_total_offline, "total": kas_total_online + kas_total_offline},
+            "total": {"online": total_online, "offline": total_offline, "total": total_online + total_offline}
+        },
+        "accounts": account_stats,
+        "online_details": all_online_details,
+        "offline_details": all_offline_details,
+        "api_errors": api_errors,
+        "cached_at": current_time
+    }
+    
+    # Update cache
+    _watcher_monitor_cache["data"] = result
+    _watcher_monitor_cache["timestamp"] = current_time
+    
+    return result
+
+# ==================== REAL-TIME MACHINE MONITORING (API-based) ====================
 @api_router.get("/admin/machine-monitor")
 async def get_machine_monitor(force_refresh: bool = False):
     """Get real-time MACHINE status from ViaBTC - showing ACTUAL worker counts"""

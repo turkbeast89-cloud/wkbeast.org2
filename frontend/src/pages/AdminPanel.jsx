@@ -52,9 +52,11 @@ const AdminPanel = () => {
   const [editingAccount, setEditingAccount] = useState(null);
   
   // Forms
-  const [accountForm, setAccountForm] = useState({ customer_id: "", username: "", password: "", worker_name: "", viabtc_api_key: "" });
+  const [accountForm, setAccountForm] = useState({ customer_id: "", username: "", password: "", worker_name: "", viabtc_api_key: "", watcher_url: "" });
   const [logForm, setLogForm] = useState({ customer_id: "", machine_info: "", description: "" });
   const [statusForm, setStatusForm] = useState({ customer_id: "", worker_name: "", status: "online", hashrate: "", temperature: "", uptime: "" });
+  const [mainWatcherUrl, setMainWatcherUrl] = useState("");
+  const [savingWatcher, setSavingWatcher] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -76,8 +78,12 @@ const AdminPanel = () => {
       setViaBtcSettings({
         access_key: viaBtcRes.data.access_key || "",
         secret_key: viaBtcRes.data.secret_key || "",
-        enabled: viaBtcRes.data.enabled || false
+        enabled: viaBtcRes.data.enabled || false,
+        watcher_key: viaBtcRes.data.watcher_key || ""
       });
+      if (viaBtcRes.data.watcher_key) {
+        setMainWatcherUrl(`https://www.viabtc.com/en/observer/worker?access_key=${viaBtcRes.data.watcher_key}&coin=LTC`);
+      }
     } catch (e) {
       console.error(e);
     } finally {
@@ -160,9 +166,23 @@ const AdminPanel = () => {
     try {
       if (editingAccount) {
         await axios.put(`${API}/customer-accounts/${editingAccount.id}`, accountForm);
+        
+        // If watcher URL provided, save it separately
+        if (accountForm.watcher_url) {
+          await axios.put(`${API}/customer-accounts/${editingAccount.id}/watcher`, null, { 
+            params: { watcher_url: accountForm.watcher_url } 
+          });
+        }
         toast.success("Account updated");
       } else {
-        await axios.post(`${API}/customer-accounts`, accountForm);
+        const res = await axios.post(`${API}/customer-accounts`, accountForm);
+        
+        // If watcher URL provided, save it separately for new account
+        if (accountForm.watcher_url && res.data.id) {
+          await axios.put(`${API}/customer-accounts/${res.data.id}/watcher`, null, { 
+            params: { watcher_url: accountForm.watcher_url } 
+          });
+        }
         toast.success("Account created");
       }
       setShowAccountModal(false);
@@ -438,6 +458,50 @@ const AdminPanel = () => {
             )}
           </div>
         )}
+
+        {/* Watcher Link (Alternative to API) */}
+        <div className="mt-6 p-4 bg-[#1A1A1A] rounded-lg border border-[#00E054]/30">
+          <div className="flex items-center gap-2 mb-2">
+            <Eye className="text-[#00E054]" size={18} />
+            <h3 className="font-medium text-[#00E054]">Watcher Link (No IP Whitelist Needed)</h3>
+          </div>
+          <p className="text-xs text-gray-500 mb-3">Use watcher links instead of API keys - no IP whitelisting required!</p>
+          
+          <div className="space-y-2">
+            <Label className="text-gray-400">Main Account Watcher URL</Label>
+            <div className="flex gap-2">
+              <Input
+                value={mainWatcherUrl}
+                onChange={e => setMainWatcherUrl(e.target.value)}
+                placeholder="https://www.viabtc.com/en/observer/worker?access_key=xxx&coin=LTC"
+                className="flex-1 bg-[#0A0A0A] border-[#27272A] text-gray-300"
+              />
+              <Button 
+                onClick={async () => {
+                  if (!mainWatcherUrl) {
+                    toast.error("Enter a watcher URL");
+                    return;
+                  }
+                  setSavingWatcher(true);
+                  try {
+                    await axios.put(`${API}/viabtc-watcher`, null, { params: { watcher_url: mainWatcherUrl } });
+                    toast.success("Main account watcher saved!");
+                    fetchData();
+                  } catch (e) {
+                    toast.error(e.response?.data?.detail || "Failed to save watcher");
+                  } finally {
+                    setSavingWatcher(false);
+                  }
+                }}
+                disabled={savingWatcher}
+                className="bg-[#00E054] text-black"
+              >
+                {savingWatcher ? <RefreshCw className="animate-spin" size={16} /> : <Save size={16} />}
+              </Button>
+            </div>
+            <p className="text-xs text-gray-500">Get watcher link from ViaBTC → Observer → Copy Link</p>
+          </div>
+        </div>
       </div>
 
       {/* Customer Accounts */}
@@ -481,10 +545,12 @@ const AdminPanel = () => {
                   <td className="py-3 px-4 text-[#00C2FF] font-mono">{account.worker_name || account.username || <span className="text-red-400">Not set</span>}</td>
                   <td className="py-3 px-4 font-mono text-gray-400">{account.password}</td>
                   <td className="py-3 px-4 font-mono text-xs">
-                    {account.viabtc_api_key ? (
-                      <span className="text-[#00E054]">{account.viabtc_api_key.substring(0, 8)}...</span>
+                    {account.watcher_key ? (
+                      <span className="text-[#00E054]" title="Watcher">👁 {account.watcher_key.substring(0, 8)}...</span>
+                    ) : account.viabtc_api_key ? (
+                      <span className="text-yellow-400" title="API Key">{account.viabtc_api_key.substring(0, 8)}...</span>
                     ) : (
-                      <span className="text-red-400">Not synced</span>
+                      <span className="text-red-400">Not configured</span>
                     )}
                   </td>
                   <td className="py-3 px-4 text-right">
@@ -495,7 +561,8 @@ const AdminPanel = () => {
                         username: account.username,
                         password: account.password,
                         worker_name: account.worker_name || "",
-                        viabtc_api_key: account.viabtc_api_key || ""
+                        viabtc_api_key: account.viabtc_api_key || "",
+                        watcher_url: account.watcher_key ? `https://www.viabtc.com/en/observer/worker?access_key=${account.watcher_key}&coin=LTC` : ""
                       }); 
                       setShowAccountModal(true); 
                     }}>
@@ -628,6 +695,16 @@ const AdminPanel = () => {
                 readOnly
               />
               <p className="text-xs text-gray-500 mt-1">Auto-synced from ViaBTC. Click "Sync ViaBTC API Keys" button.</p>
+            </div>
+            <div>
+              <Label className="text-[#00E054]">Watcher Link URL (Recommended - No IP whitelist needed)</Label>
+              <Input 
+                value={accountForm.watcher_url || ""} 
+                onChange={(e) => setAccountForm({ ...accountForm, watcher_url: e.target.value })} 
+                className="bg-[#0A0A0A] border-[#00E054]/30 mt-1 text-xs" 
+                placeholder="https://www.viabtc.com/en/observer/worker?access_key=xxx&coin=LTC" 
+              />
+              <p className="text-xs text-gray-500 mt-1">Get from ViaBTC → Observer → Copy watcher link</p>
             </div>
           </div>
           <DialogFooter>
