@@ -1152,7 +1152,7 @@ async def test_viabtc_connection():
             "X-SIGNATURE": signature
         }
         
-        url = f"https://pool.viabtc.com/res/openapi/v1/hashrate?{query_string}"
+        url = f"https://www.viabtc.com/res/openapi/v1/hashrate?{query_string}"
         
         # Get server IP first
         try:
@@ -1254,7 +1254,7 @@ async def get_viabtc_earnings(coin: str = "LTC"):
             "X-SIGNATURE": signature
         }
         
-        url = f"https://pool.viabtc.com/res/openapi/v1/profit?{query_string}"
+        url = f"https://www.viabtc.com/res/openapi/v1/profit?{query_string}"
         
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers, timeout=15, proxy=_proxy()) as resp:
@@ -1324,7 +1324,7 @@ async def get_customer_earnings(account_id: str):
                 "X-SIGNATURE": signature
             }
             
-            account_url = f"https://pool.viabtc.com/res/openapi/v1/account?{query_string}"
+            account_url = f"https://www.viabtc.com/res/openapi/v1/account?{query_string}"
             
             try:
                 async with session.get(account_url, headers=headers, timeout=10, proxy=_proxy()) as resp:
@@ -1357,7 +1357,7 @@ async def get_customer_earnings(account_id: str):
                     "X-SIGNATURE": signature
                 }
                 
-                url = f"https://pool.viabtc.com/res/openapi/v1/profit?{query_string}"
+                url = f"https://www.viabtc.com/res/openapi/v1/profit?{query_string}"
                 
                 try:
                     async with session.get(url, headers=headers, timeout=10, proxy=_proxy()) as resp:
@@ -1433,7 +1433,7 @@ async def get_viabtc_subaccounts():
             "X-SIGNATURE": signature
         }
         
-        url = f"https://pool.viabtc.com/res/openapi/v1/account/sub?{query_string}"
+        url = f"https://www.viabtc.com/res/openapi/v1/account/sub?{query_string}"
         
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers, timeout=15, proxy=_proxy()) as resp:
@@ -1570,7 +1570,7 @@ async def get_viabtc_workers(coin: str = "LTC"):
         }
         
         # Get workers list using the correct endpoint
-        url = f"https://pool.viabtc.com/res/openapi/v1/hashrate/worker?{query_string}"
+        url = f"https://www.viabtc.com/res/openapi/v1/hashrate/worker?{query_string}"
         
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers, timeout=15, proxy=_proxy()) as resp:
@@ -1643,7 +1643,7 @@ async def get_customer_workers(customer_account_id: str):
                     "X-SIGNATURE": signature
                 }
                 
-                url = f"https://pool.viabtc.com/res/openapi/v1/hashrate/worker?{query_string}"
+                url = f"https://www.viabtc.com/res/openapi/v1/hashrate/worker?{query_string}"
                 
                 async with session.get(url, headers=headers, timeout=15, proxy=_proxy()) as resp:
                     data = await resp.json()
@@ -1701,7 +1701,7 @@ async def get_viabtc_hashrate(coin: str = "LTC"):
             "X-SIGNATURE": signature
         }
         
-        url = f"https://pool.viabtc.com/res/openapi/v1/hashrate?{query_string}"
+        url = f"https://www.viabtc.com/res/openapi/v1/hashrate?{query_string}"
         
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers, timeout=15, proxy=_proxy()) as resp:
@@ -1760,7 +1760,7 @@ async def get_worker_status(worker_name: str, coin: str = "LTC", api_key: str = 
             "X-SIGNATURE": signature
         }
         
-        url = f"https://pool.viabtc.com/res/openapi/v1/hashrate/worker?{query_string}"
+        url = f"https://www.viabtc.com/res/openapi/v1/hashrate/worker?{query_string}"
         
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers, timeout=15, proxy=_proxy()) as resp:
@@ -2204,7 +2204,7 @@ async def get_machine_monitor(force_refresh: bool = False):
                         "X-SIGNATURE": signature
                     }
                     
-                    url = f"https://pool.viabtc.com/res/openapi/v1/hashrate/worker?{query_string}"
+                    url = f"https://www.viabtc.com/res/openapi/v1/hashrate/worker?{query_string}"
                     
                     async with session.get(url, headers=headers, timeout=15, proxy=_proxy()) as resp:
                         data = await resp.json()
