@@ -183,6 +183,18 @@ async def get_machine_types():
     types = await db.machine_types.find({}, {"_id": 0}).to_list(100)
     return types
 
+@api_router.get("/server-ip")
+async def get_server_ip():
+    """Get the server's external IP for ViaBTC whitelisting"""
+    import aiohttp
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get("https://api.ipify.org", timeout=5) as resp:
+                ip = (await resp.text()).strip()
+                return {"ip": ip, "message": f"Whitelist this IP in ViaBTC: {ip}"}
+    except:
+        return {"ip": "unknown", "message": "Could not fetch IP. Try: curl https://api.ipify.org"}
+
 @api_router.post("/machine-types", response_model=MachineType)
 async def create_machine_type(data: MachineTypeCreate):
     machine_type = MachineType(**data.model_dump())
