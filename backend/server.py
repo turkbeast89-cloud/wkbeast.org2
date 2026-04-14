@@ -1095,43 +1095,37 @@ async def test_viabtc_connection():
         
         url = f"https://pool.viabtc.com/res/openapi/v1/hashrate?{query_string}"
         
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, timeout=15) as resp:
+        # Get server IP first
+        try:
+            async with aiohttp.ClientSession() as ip_session:
+                async with ip_session.get("https://api.ipify.org", timeout=5) as ip_resp:
+                    server_ip = (await ip_resp.text()).strip()
+        except:
+            server_ip = "unknown"
+        
+        # Increase timeout and add retry
+        timeout = aiohttp.ClientTimeout(total=30, connect=15)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url, headers=headers) as resp:
                 data = await resp.json()
                 
                 if resp.status == 200 and data.get("code") == 0:
                     return {
                         "success": True,
                         "message": "Connection successful! API is working.",
-                        "data": data.get("data", {})
+                        "data": data.get("data", {}),
+                        "server_ip": server_ip
                     }
                 else:
                     error_msg = data.get("message", "Unknown error")
                     error_code = data.get("code")
                     
-                    # Provide helpful messages for common errors
-                    if error_code == 12004:
-                        # Get actual server IP dynamically
-                        try:
-                            async with aiohttp.ClientSession() as ip_session:
-                                async with ip_session.get("https://api.ipify.org", timeout=5) as ip_resp:
-                                    actual_ip = await ip_resp.text()
-                        except:
-                            actual_ip = "unknown"
-                        
-                        return {
-                            "success": False,
-                            "error": error_msg,
-                            "message": f"IP not whitelisted. Add server IP: {actual_ip} to your ViaBTC API whitelist.",
-                            "code": error_code,
-                            "server_ip": actual_ip
-                        }
-                    
                     return {
                         "success": False,
                         "error": error_msg,
-                        "message": f"API returned error: {error_msg}",
-                        "code": error_code
+                        "message": f"API error: {error_msg}" if error_code != 12004 else f"IP not whitelisted. Add server IP: {server_ip}",
+                        "code": error_code,
+                        "server_ip": server_ip
                     }
     except aiohttp.ClientError as e:
         # Get server IP for error message
