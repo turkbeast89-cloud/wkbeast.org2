@@ -1134,16 +1134,34 @@ async def test_viabtc_connection():
                         "code": error_code
                     }
     except aiohttp.ClientError as e:
+        # Get server IP for error message
+        try:
+            async with aiohttp.ClientSession() as ip_session:
+                async with ip_session.get("https://api.ipify.org", timeout=5) as ip_resp:
+                    server_ip = (await ip_resp.text()).strip()
+        except:
+            server_ip = "unknown"
+        
         return {
             "success": False,
             "error": str(e),
-            "message": "Network error - could not connect to ViaBTC"
+            "message": f"Network error - could not connect to ViaBTC",
+            "server_ip": server_ip
         }
     except Exception as e:
+        # Get server IP for error message
+        try:
+            async with aiohttp.ClientSession() as ip_session:
+                async with ip_session.get("https://api.ipify.org", timeout=5) as ip_resp:
+                    server_ip = (await ip_resp.text()).strip()
+        except:
+            server_ip = "unknown"
+        
         return {
             "success": False,
             "error": str(e),
-            "message": f"Error testing connection: {str(e)}"
+            "message": f"Error: {str(e)}",
+            "server_ip": server_ip
         }
 
 @api_router.get("/viabtc/earnings/{coin}")
