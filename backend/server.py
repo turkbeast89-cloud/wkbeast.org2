@@ -1113,23 +1113,50 @@ async def update_main_watcher_key(watcher_url: str):
 
 @api_router.post("/viabtc-test")
 async def test_viabtc_connection():
-    """Test ViaBTC API connection"""
+    """Test ViaBTC connection using watcher key (primary) or API key (fallback)"""
     import aiohttp
-    import hashlib
-    import hmac
-    import time
-    from urllib.parse import urlencode
     
     settings = await db.viabtc_settings.find_one({"id": "viabtc_settings"}, {"_id": 0})
-    if not settings or not settings.get("access_key") or not settings.get("secret_key"):
+    
+    # Try watcher key first (bypasses Cloudflare)
+    watcher_key = settings.get("watcher_key") if settings else None
+    if watcher_key:
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"https://www.viabtc.com/res/observer/worker?access_key={watcher_key}&coin=LTC"
+                async with session.get(url, timeout=15) as resp:
+                    data = await resp.json()
+                    if resp.status == 200 and data.get("code") == 0:
+                        workers = data.get("data", {}).get("data", [])
+                        active = data.get("data", {}).get("active", 0)
+                        return {
+                            "success": True,
+                            "message": f"Watcher connection successful! Found {len(workers)} workers ({active} active).",
+                            "mode": "watcher",
+                            "data": {"workers": len(workers), "active": active}
+                        }
+                    else:
+                        return {
+                            "success": False,
+                            "error": data.get("message", "Unknown error"),
+                            "message": f"Watcher key error: {data.get('message', 'Unknown')}",
+                            "mode": "watcher"
+                        }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "message": f"Watcher connection failed: {str(e)}",
+                "mode": "watcher"
+            }
+    
+    # No watcher key - check if API keys exist
+    if not settings or not settings.get("access_key"):
         return {
             "success": False,
-            "error": "API keys not configured",
-            "message": "Please enter your Access Key and Secret Key first"
+            "error": "No watcher key or API keys configured",
+            "message": "Add a Watcher Link from ViaBTC → Observer → Copy Link"
         }
-    
-    access_key = settings["access_key"]
-    secret_key = settings["secret_key"]
     
     try:
         # ViaBTC API - get hashrate (public endpoint with API key)
@@ -1954,10 +1981,10 @@ async def get_machine_monitor_watcher(force_refresh: bool = False):
     
     # Fetch worker data from watcher links
     async def fetch_workers_from_watcher(session, watcher_key, coin):
-        """Fetch workers from ViaBTC watcher link"""
+        """Fetch workers from ViaBTC watcher link - uses observer endpoint that bypasses Cloudflare"""
         try:
-            url = f"https://www.viabtc.com/res/openapi/v1/observer/worker?access_key={watcher_key}&coin={coin}"
-            async with session.get(url, timeout=15, proxy=_proxy()) as resp:
+            url = f"https://www.viabtc.com/res/observer/worker?access_key={watcher_key}&coin={coin}"
+            async with session.get(url, timeout=15) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     if data.get("code") == 0:
@@ -2115,155 +2142,77 @@ async def get_machine_monitor_watcher(force_refresh: bool = False):
     
     return result
 
-# ==================== REAL-TIME MACHINE MONITORING (API-based) ====================
+# ==================== REAL-TIME MACHINE MONITORING (Watcher-based, no IP whitelist needed) ====================
 @api_router.get("/admin/machine-monitor")
 async def get_machine_monitor(force_refresh: bool = False):
-    """Get real-time MACHINE status from ViaBTC - showing ACTUAL worker counts"""
+    """Get real-time MACHINE status from ViaBTC using watcher links (bypasses Cloudflare)"""
     global _machine_monitor_cache
     import aiohttp
-    import hashlib
-    import hmac
-    from urllib.parse import urlencode
     
     # Check cache first (unless force refresh)
     current_time = time.time()
     if not force_refresh and _machine_monitor_cache["data"] and (current_time - _machine_monitor_cache["timestamp"]) < CACHE_TTL:
         return _machine_monitor_cache["data"]
     
-    # Get MAIN API settings
-    settings = await db.viabtc_settings.find_one({"id": "viabtc_settings"}, {"_id": 0})
-    if not settings or not settings.get("enabled"):
-        return {"success": False, "error": "ViaBTC integration not enabled"}
-    
-    main_api_key = settings.get("access_key", "")
-    main_secret_key = settings.get("secret_key", "")
-    
-    if not main_api_key or not main_secret_key:
-        return {"success": False, "error": "Main API keys not configured"}
-    
-    # Get customer accounts to map API keys to display names
+    # Get customer accounts with watcher keys
     customer_accounts = await db.customer_accounts.find({}, {"_id": 0}).to_list(1000)
     customers = await db.customers.find({}, {"_id": 0}).to_list(1000)
-    
-    # Build maps
     customer_map = {c["id"]: c for c in customers}
-    account_by_api_key = {}  # api_key -> account info
     
-    # Build a set of EXACT worker_names from customer_accounts that are paused
-    # These are the sub-accounts with their own API keys
-    paused_subaccount_names = set()
-    for acc in customer_accounts:
-        customer = customer_map.get(acc.get("customer_id"), {})
-        if customer.get("status") == "paused":
-            worker_name = acc.get("worker_name", "").lower()
-            if worker_name:
-                paused_subaccount_names.add(worker_name)
+    # Get main account watcher key
+    settings = await db.viabtc_settings.find_one({"id": "viabtc_settings"}, {"_id": 0})
+    main_watcher_key = settings.get("watcher_key") if settings else None
+    
+    # Collect accounts with watcher keys (skip paused)
+    accounts_to_fetch = []
+    seen_watcher_keys = set()
     
     for acc in customer_accounts:
-        api_key = acc.get("viabtc_api_key")
-        if api_key:
+        watcher_key = acc.get("watcher_key")
+        if watcher_key and watcher_key not in seen_watcher_keys:
             customer = customer_map.get(acc.get("customer_id"), {})
-            account_by_api_key[api_key] = {
-                "worker_name": acc.get("worker_name", ""),
-                "display_name": customer.get("name", acc.get("worker_name", "")),
-                "status": customer.get("status", "active")
-            }
+            if customer.get("status") != "paused":
+                seen_watcher_keys.add(watcher_key)
+                accounts_to_fetch.append({
+                    "watcher_key": watcher_key,
+                    "worker_name": acc.get("worker_name", ""),
+                    "display_name": customer.get("name", acc.get("worker_name", "")),
+                })
     
-    # Add main account
-    account_by_api_key[main_api_key] = {
-        "worker_name": "turkbeast",
-        "display_name": "turkbeast (Main)",
-        "status": "active"
-    }
+    # Add main account if it has watcher key and not already added
+    if main_watcher_key and main_watcher_key not in seen_watcher_keys:
+        accounts_to_fetch.append({
+            "watcher_key": main_watcher_key,
+            "worker_name": "turkbeast",
+            "display_name": "turkbeast (Main)",
+        })
     
-    # Helper function to fetch workers for a specific API key WITH RETRY
-    async def fetch_workers_for_account(session, api_key, secret_key, coin, max_retries=3):
-        workers = []
-        page = 1
-        has_more = True
-        api_error = None
-        
-        while has_more and page <= 5:
-            success = False
-            
-            # Retry loop for each page
-            for attempt in range(max_retries):
-                try:
-                    tonce = str(int(time.time() * 1000))
-                    params = {"coin": coin, "limit": 100, "page": page, "tonce": tonce}
-                    query_string = urlencode(params)
-                    
-                    signature = hmac.new(
-                        secret_key.encode('utf-8'),
-                        query_string.encode('utf-8'),
-                        hashlib.sha256
-                    ).hexdigest()
-                    
-                    headers = {
-                        "X-API-KEY": api_key,
-                        "X-SIGNATURE": signature
-                    }
-                    
-                    url = f"https://www.viabtc.com/res/openapi/v1/hashrate/worker?{query_string}"
-                    
-                    async with session.get(url, headers=headers, timeout=15, proxy=_proxy()) as resp:
-                        data = await resp.json()
-                        
-                        if resp.status == 200 and data.get("code") == 0:
-                            page_workers = data.get("data", {}).get("data", [])
-                            if not page_workers:
-                                has_more = False
-                            else:
-                                workers.extend(page_workers)
-                                if len(page_workers) < 100:
-                                    has_more = False
-                                else:
-                                    page += 1
-                            success = True
-                            api_error = None
-                            break  # Success, exit retry loop
-                        elif data.get("code") == 12004:
-                            # IP not allowed error - no point retrying
-                            api_error = "IP not whitelisted"
-                            has_more = False
-                            success = True  # Don't retry IP errors
-                            break
-                        else:
-                            api_error = data.get("message", "API error")
-                            # Will retry
-                except asyncio.TimeoutError:
-                    api_error = "Timeout"
-                    # Will retry
-                except Exception as e:
-                    api_error = str(e)
-                    # Will retry
-                
-                # Wait before retry (exponential backoff)
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(0.5 * (attempt + 1))
-            
-            # If all retries failed, stop
-            if not success and api_error:
-                has_more = False
-        
-        # Return workers and any error info
-        return {"workers": workers, "error": api_error if not workers else None}
+    if not accounts_to_fetch:
+        return {
+            "success": False,
+            "error": "No watcher keys configured. Add watcher links in Admin Panel → Customer Accounts.",
+            "message": "Go to ViaBTC → Observer → Copy Link, then paste in Admin Panel"
+        }
     
-    # Collect unique API keys to query
-    unique_api_keys = {}
-    for acc in customer_accounts:
-        api_key = acc.get("viabtc_api_key")
-        secret_key = acc.get("viabtc_secret_key")
-        if api_key and secret_key:
-            unique_api_keys[api_key] = secret_key
+    # Helper to fetch workers from the working observer endpoint
+    async def fetch_observer_workers(session, watcher_key, coin):
+        try:
+            url = f"https://www.viabtc.com/res/observer/worker?access_key={watcher_key}&coin={coin}&limit=200"
+            async with session.get(url, timeout=15) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if data.get("code") == 0:
+                        return {"workers": data.get("data", {}).get("data", []), "error": None}
+                    else:
+                        return {"workers": [], "error": data.get("message", "API error")}
+                else:
+                    return {"workers": [], "error": f"HTTP {resp.status}"}
+        except Exception as e:
+            return {"workers": [], "error": str(e)}
     
-    # Always include main account
-    unique_api_keys[main_api_key] = main_secret_key
-    
-    # Fetch real worker data from ALL accounts in PARALLEL
+    # Fetch ALL accounts in parallel
     account_stats = []
-    api_errors = []  # Track which accounts have API errors
-    
+    api_errors = []
     ltc_total_online = 0
     ltc_total_offline = 0
     kas_total_online = 0
@@ -2272,37 +2221,28 @@ async def get_machine_monitor(force_refresh: bool = False):
     all_offline_details = []
     
     async with aiohttp.ClientSession() as session:
-        # Create tasks for ALL API calls (both LTC and KAS for each account)
-        async def fetch_account_data(api_key, secret_key):
-            account_info = account_by_api_key.get(api_key, {"worker_name": "unknown", "display_name": "Unknown", "status": "active"})
-            
-            # Skip paused accounts
-            if account_info.get("status") == "paused":
-                return None
-            
-            display_name = account_info["display_name"]
-            worker_name = account_info["worker_name"]
+        async def fetch_account_data(acc_info):
+            watcher_key = acc_info["watcher_key"]
+            display_name = acc_info["display_name"]
+            worker_name = acc_info["worker_name"]
             
             # Fetch LTC and KAS workers in parallel
             try:
                 ltc_result, kas_result = await asyncio.gather(
-                    fetch_workers_for_account(session, api_key, secret_key, "LTC"),
-                    fetch_workers_for_account(session, api_key, secret_key, "KAS")
+                    fetch_observer_workers(session, watcher_key, "LTC"),
+                    fetch_observer_workers(session, watcher_key, "KAS")
                 )
             except Exception as e:
-                # Return error info
                 return {"error": True, "account": display_name, "worker_name": worker_name, "reason": str(e)}
             
-            # Check if we got API errors
-            ltc_error = ltc_result.get("error") if isinstance(ltc_result, dict) else None
-            kas_error = kas_result.get("error") if isinstance(kas_result, dict) else None
+            ltc_error = ltc_result.get("error")
+            kas_error = kas_result.get("error")
             
-            if ltc_error:
+            if ltc_error and kas_error:
                 return {"error": True, "account": display_name, "worker_name": worker_name, "reason": ltc_error}
             
-            # Extract workers from result
-            ltc_workers = ltc_result.get("workers", []) if isinstance(ltc_result, dict) else []
-            kas_workers = kas_result.get("workers", []) if isinstance(kas_result, dict) else []
+            ltc_workers = ltc_result.get("workers", [])
+            kas_workers = kas_result.get("workers", [])
             
             ltc_online = 0
             ltc_offline = 0
@@ -2311,45 +2251,31 @@ async def get_machine_monitor(force_refresh: bool = False):
             offline_workers = []
             online_workers = []
             
-            # Process LTC workers
             for w in ltc_workers:
-                worker_name_viabtc = w.get("worker_name", "")
+                wname = w.get("worker_name", w.get("name", ""))
                 hashrate = int(w.get("hashrate_1hour", 0) or 0)
-                status = w.get("worker_status", "")
+                status = w.get("worker_status", w.get("status", ""))
                 
-                # Machine is online ONLY if status is "active"
-                # "unactive", "inactive", "offline" all mean NOT online
-                is_online = status == "active"
-                # Show as offline if status is "offline" or "unactive" (recently stopped)
-                is_truly_offline = status in ["offline", "unactive"]
-                
-                if is_online:
+                if status == "active":
                     ltc_online += 1
-                    online_workers.append({"name": worker_name_viabtc, "coin": "LTC", "hashrate": hashrate})
-                elif is_truly_offline:
-                    # Add to offline list
+                    online_workers.append({"name": wname, "coin": "LTC", "hashrate": hashrate})
+                elif status in ["offline", "unactive"]:
                     ltc_offline += 1
-                    offline_workers.append({"name": worker_name_viabtc, "coin": "LTC", "status": status})
-                # Skip "invalid" workers - don't count them at all
+                    offline_workers.append({"name": wname, "coin": "LTC", "status": status})
             
-            # Process KAS workers
             for w in kas_workers:
-                worker_name_viabtc = w.get("worker_name", "")
+                wname = w.get("worker_name", w.get("name", ""))
                 hashrate = int(w.get("hashrate_1hour", 0) or 0)
-                status = w.get("worker_status", "")
+                status = w.get("worker_status", w.get("status", ""))
                 
-                is_online = status == "active"
-                is_truly_offline = status in ["offline", "unactive"]
-                
-                if is_online:
+                if status == "active":
                     kas_online += 1
-                    online_workers.append({"name": worker_name_viabtc, "coin": "KAS", "hashrate": hashrate})
-                elif is_truly_offline:
+                    online_workers.append({"name": wname, "coin": "KAS", "hashrate": hashrate})
+                elif status in ["offline", "unactive"]:
                     kas_offline += 1
-                    offline_workers.append({"name": worker_name_viabtc, "coin": "KAS", "status": status})
+                    offline_workers.append({"name": wname, "coin": "KAS", "status": status})
             
             if ltc_online + ltc_offline + kas_online + kas_offline > 0:
-                # Calculate total hashrates
                 ltc_hashrate = sum(w["hashrate"] for w in online_workers if w["coin"] == "LTC")
                 kas_hashrate = sum(w["hashrate"] for w in online_workers if w["coin"] == "KAS")
                 
@@ -2369,27 +2295,21 @@ async def get_machine_monitor(force_refresh: bool = False):
                 }
             return None
         
-        # Execute account fetches in batches to avoid overwhelming ViaBTC API
-        import asyncio
-        
-        api_keys_list = list(unique_api_keys.items())
+        # Execute in batches of 5
+        keys_list = accounts_to_fetch
         results = []
-        batch_size = 5  # Process 5 accounts at a time
+        batch_size = 5
         
-        for i in range(0, len(api_keys_list), batch_size):
-            batch = api_keys_list[i:i + batch_size]
-            batch_tasks = [fetch_account_data(api_key, secret_key) for api_key, secret_key in batch]
+        for i in range(0, len(keys_list), batch_size):
+            batch = keys_list[i:i + batch_size]
+            batch_tasks = [fetch_account_data(acc) for acc in batch]
             batch_results = await asyncio.gather(*batch_tasks)
             results.extend(batch_results)
-            
-            # Small delay between batches to avoid rate limiting
-            if i + batch_size < len(api_keys_list):
+            if i + batch_size < len(keys_list):
                 await asyncio.sleep(0.2)
         
-        # Process results
         for result in results:
             if result:
-                # Check if this is an error result
                 if result.get("error"):
                     api_errors.append({
                         "account": result.get("account"),
@@ -2399,7 +2319,6 @@ async def get_machine_monitor(force_refresh: bool = False):
                     continue
                 
                 account_stats.append(result)
-                
                 ltc_total_online += result["ltc_online"]
                 ltc_total_offline += result["ltc_offline"]
                 kas_total_online += result["kas_online"]
@@ -2409,51 +2328,33 @@ async def get_machine_monitor(force_refresh: bool = False):
                 worker_name = result["worker_name"]
                 
                 if result["ltc_online"] > 0:
-                    # Get LTC workers from online_workers
-                    ltc_workers = [w for w in result.get("online_workers", []) if w["coin"] == "LTC"]
+                    ltc_workers_list = [w for w in result.get("online_workers", []) if w["coin"] == "LTC"]
                     all_online_details.append({
-                        "worker": display_name,
-                        "worker_name": worker_name,
-                        "coin": "LTC",
-                        "machines": result["ltc_online"],
-                        "hashrate": result.get("ltc_hashrate", 0),
-                        "workers": ltc_workers
+                        "worker": display_name, "worker_name": worker_name,
+                        "coin": "LTC", "machines": result["ltc_online"],
+                        "hashrate": result.get("ltc_hashrate", 0), "workers": ltc_workers_list
                     })
                 if result["kas_online"] > 0:
-                    # Get KAS workers from online_workers
-                    kas_workers = [w for w in result.get("online_workers", []) if w["coin"] == "KAS"]
+                    kas_workers_list = [w for w in result.get("online_workers", []) if w["coin"] == "KAS"]
                     all_online_details.append({
-                        "worker": display_name,
-                        "worker_name": worker_name,
-                        "coin": "KAS",
-                        "machines": result["kas_online"],
-                        "hashrate": result.get("kas_hashrate", 0),
-                        "workers": kas_workers
+                        "worker": display_name, "worker_name": worker_name,
+                        "coin": "KAS", "machines": result["kas_online"],
+                        "hashrate": result.get("kas_hashrate", 0), "workers": kas_workers_list
                     })
                 
                 for ow in result["offline_workers"]:
                     all_offline_details.append({
-                        "worker": display_name,
-                        "worker_name": worker_name,
-                        "machine_name": ow["name"],
-                        "coin": ow["coin"],
+                        "worker": display_name, "worker_name": worker_name,
+                        "machine_name": ow["name"], "coin": ow["coin"],
                         "reason": ow.get("status", "offline")
                     })
     
     total_online = ltc_total_online + kas_total_online
     total_offline = ltc_total_offline + kas_total_offline
     
-    # Get current server IP for error messages
-    try:
-        import aiohttp as aio_check
-        async with aio_check.ClientSession() as ip_session:
-            async with ip_session.get("https://api.ipify.org", timeout=5, proxy=_proxy()) as ip_resp:
-                server_ip = (await ip_resp.text()).strip()
-    except:
-        server_ip = "Run: curl ifconfig.me"
-    
     result = {
         "success": True,
+        "mode": "watcher",
         "stats": {
             "ltc": {"online": ltc_total_online, "offline": ltc_total_offline, "total": ltc_total_online + ltc_total_offline},
             "kas": {"online": kas_total_online, "offline": kas_total_offline, "total": kas_total_online + kas_total_offline},
@@ -2462,12 +2363,10 @@ async def get_machine_monitor(force_refresh: bool = False):
         "accounts": account_stats,
         "online_details": all_online_details,
         "offline_details": all_offline_details,
-        "api_errors": api_errors,  # Show which accounts failed
-        "server_ip": server_ip,
+        "api_errors": api_errors,
         "cached_at": current_time
     }
     
-    # Update cache
     _machine_monitor_cache["data"] = result
     _machine_monitor_cache["timestamp"] = current_time
     

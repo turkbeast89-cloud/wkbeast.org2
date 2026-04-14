@@ -1,101 +1,43 @@
-# WKBeast Mining Farm Manager - Product Requirements Document
+# WKBeast Mining Farm Manager - PRD
 
 ## Original Problem Statement
-Full-stack application to manage a crypto mining farm with:
-- Customer management with WhatsApp contacts
-- Machine types and monthly hosting fees
-- Automatic payment tracking and reminders
-- Customer portal with live machine status from ViaBTC
-- Admin dashboard with real-time monitoring
+Full-stack application to manage a crypto mining farm. Core requirements include tracking customers, machine types, monthly hosting fees, WhatsApp reminders, and a customer portal for live stats. Critical feature is ViaBTC integration for live machine status, hashrates, and earnings.
 
-## Core Features Implemented
+## Architecture
+- **Frontend:** React + Tailwind CSS + shadcn/ui
+- **Backend:** FastAPI (Python), asyncio for parallel requests
+- **Database:** MongoDB Atlas
+- **ViaBTC Integration:** Watcher/Observer API (bypasses Cloudflare)
 
-### Admin Dashboard
-- [x] Monthly profit/revenue/cost overview
-- [x] Real-time machine monitor with ViaBTC integration
-- [x] Per-account hashrate display with expandable worker details
-- [x] Online/offline machine status
-- [x] Paused customers excluded from offline alerts
-- [x] Fast loading with caching (30s) and parallel API calls
-- [x] Retry logic for reliable API connections
+## Key Technical Decision: ViaBTC API Access
+- `pool.viabtc.com` API is behind Cloudflare managed challenge — blocks ALL server-side requests
+- **Solution:** Use `https://www.viabtc.com/res/observer/worker` endpoint with watcher access_keys
+- This endpoint bypasses Cloudflare and returns live worker data (status, hashrates, online/offline counts)
+- No IP whitelisting needed — watcher keys are the only auth
+- Proxy support (PROXY_URL env var) is still in the code but not needed for watcher approach
 
-### Customer Management
-- [x] Customer CRUD operations
-- [x] Machine assignment per customer
-- [x] WhatsApp integration for reminders
-- [x] Prepaid/active/paused status
+## Implemented Features
+- Admin dashboard with revenue, costs, profit tracking
+- Customer management (CRUD, machines, billing)
+- Monthly payment generation and tracking
+- WhatsApp payment reminder links
+- Excel import/export for customer data
+- Customer portal with login (username/password)
+- ViaBTC watcher-based machine monitoring (live worker status, hashrates)
+- Machine monitor with per-sub-account stats (LTC + KAS)
+- Paused customer exclusion from monitoring
+- 30-second cache for API responses
+- Maintenance logs
+- Farm stats display
+- CoinGecko crypto price integration
 
-### Customer Portal
-- [x] Separate login for customers
-- [x] Live machine status from ViaBTC
-- [x] Earnings display (Total Mined + Available Balance)
-- [x] Dynamic farm statistics
+## Pending Items
+- Add watcher keys for ALL sub-accounts (currently only hamidwk has one)
+- Live earnings calculator (fiat value of mined coins)
+- In-app notifications when machine goes offline
+- Auto-payment confirmation flow
+- Server.py modularization into routers
 
-### ViaBTC Integration
-- [x] Main account + sub-account support
-- [x] Worker status (online/offline/unactive)
-- [x] Real-time hashrate per worker
-- [x] Multi-coin support (LTC, KAS)
-- [x] IP whitelist error handling with server IP display
-
-### Payments
-- [x] Monthly payment tracking
-- [x] Filterable payment list (paid/unpaid/paused)
-- [x] Automatic fee calculation
-
-## Technical Architecture
-```
-Frontend: React + Tailwind CSS + shadcn/ui
-Backend: FastAPI (Python)
-Database: MongoDB
-External APIs: ViaBTC Pool API
-```
-
-## API Endpoints
-- `/api/admin/machine-monitor` - Real-time machine status
-- `/api/customer/earnings` - Customer earnings from ViaBTC
-- `/api/viabtc/sync-accounts` - Sync sub-account API keys
-- `/api/admin/password` - Update admin password
-
-## Deployment Notes
-1. Whitelist production server IP in ViaBTC for all API keys
-2. Run `/api/viabtc/sync-accounts` after deployment
-3. Credentials: Admin password `127512`
-
-## Prioritized Backlog
-
-### P0 - Complete
-- Real-time machine monitoring
-- Hashrate display per account/worker
-- Reliable API connections with retry
-
-### P1 - Next
-- Live Earnings Calculator (CoinGecko integration for $ values)
-- Maintenance Log Feature (admin notes visible to customers)
-
-### P2 - Future
-- In-App Notifications (offline machine alerts)
-- Auto-Payment Confirmation Flow
-- Monthly performance reports via email
-
-### P3 - Backlog
-- Backend refactoring (split server.py into routers)
-- Custom domain setup guidance
-- Delete legacy desktop-app directory
-
-## Changelog
-
-### 2025-03-06
-- Added total hashrate display per sub-account
-- Added expandable worker list with individual hashrates
-- Fixed "unactive" status detection for offline machines
-- Added retry logic (3 attempts) for API reliability
-- Added batch processing to avoid API rate limiting
-- Added API error reporting with IP whitelist instructions
-
-### Previous Sessions
-- Implemented real-time machine monitor
-- Added live earnings from ViaBTC
-- Fixed paused customer handling
-- Implemented parallel API calls with caching
-- Added customer portal with merged account support
+## Credentials
+- Admin password: 127512
+- Customer portal: turkbeast/2005, hamidwk/(last 4 of phone)
