@@ -383,20 +383,35 @@ const Dashboard = () => {
                   </span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
-                  {machineMonitor.offline_details.map((detail, idx) => (
+                  {machineMonitor.offline_details.map((detail, idx) => {
+                    const offlineDuration = detail.last_active ? (() => {
+                      const seconds = Math.floor(Date.now() / 1000) - detail.last_active;
+                      if (seconds < 60) return `${seconds}s ago`;
+                      const minutes = Math.floor(seconds / 60);
+                      if (minutes < 60) return `${minutes}m ago`;
+                      const hours = Math.floor(minutes / 60);
+                      if (hours < 24) return `${hours}h ${minutes % 60}m ago`;
+                      const days = Math.floor(hours / 24);
+                      return `${days}d ${hours % 24}h ago`;
+                    })() : '';
+                    return (
                     <div key={idx} className="bg-[#0A0A0A] rounded-lg px-3 py-2 flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <WifiOff size={14} className="text-[#EF4444]" />
                         <div>
                           <span className="text-sm text-white font-medium">{detail.machine_name || detail.worker}</span>
                           <span className="text-xs text-gray-500 ml-2">({detail.worker})</span>
+                          {offlineDuration && (
+                            <div className="text-xs text-[#EF4444]/80 mt-0.5">Offline since {offlineDuration}</div>
+                          )}
                         </div>
                       </div>
                       <span className={`text-xs px-2 py-0.5 rounded ${
                         detail.coin === 'LTC' ? 'bg-gray-700 text-gray-300' : 'bg-teal-900 text-teal-300'
                       }`}>{detail.coin}</span>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}

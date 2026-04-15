@@ -2261,7 +2261,7 @@ async def get_machine_monitor(force_refresh: bool = False):
                     online_workers.append({"name": wname, "coin": "LTC", "hashrate": hashrate})
                 elif status in ["offline", "unactive"]:
                     ltc_offline += 1
-                    offline_workers.append({"name": wname, "coin": "LTC", "status": status})
+                    offline_workers.append({"name": wname, "coin": "LTC", "status": status, "last_active": w.get("last_active", 0)})
             
             for w in kas_workers:
                 wname = w.get("worker_name", w.get("name", ""))
@@ -2273,7 +2273,7 @@ async def get_machine_monitor(force_refresh: bool = False):
                     online_workers.append({"name": wname, "coin": "KAS", "hashrate": hashrate})
                 elif status in ["offline", "unactive"]:
                     kas_offline += 1
-                    offline_workers.append({"name": wname, "coin": "KAS", "status": status})
+                    offline_workers.append({"name": wname, "coin": "KAS", "status": status, "last_active": w.get("last_active", 0)})
             
             if ltc_online + ltc_offline + kas_online + kas_offline > 0:
                 ltc_hashrate = sum(w["hashrate"] for w in online_workers if w["coin"] == "LTC")
@@ -2346,7 +2346,8 @@ async def get_machine_monitor(force_refresh: bool = False):
                     all_offline_details.append({
                         "worker": display_name, "worker_name": worker_name,
                         "machine_name": ow["name"], "coin": ow["coin"],
-                        "reason": ow.get("status", "offline")
+                        "reason": ow.get("status", "offline"),
+                        "last_active": ow.get("last_active", 0)
                     })
     
     total_online = ltc_total_online + kas_total_online
