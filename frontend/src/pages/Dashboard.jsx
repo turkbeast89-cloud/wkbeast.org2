@@ -21,6 +21,7 @@ const Dashboard = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [showOnline, setShowOnline] = useState(false);  // Toggle for online machines
   const [expandedAccount, setExpandedAccount] = useState(null);  // Track which account is expanded
+  const [monitorMode, setMonitorMode] = useState("api");  // "api" or "watcher"
 
   // Helper to format hashrate
   const formatHashrate = (hashrate, coin) => {
@@ -47,7 +48,7 @@ const Dashboard = () => {
     // Auto-refresh machine monitor every 60 seconds
     const interval = setInterval(fetchMachineMonitor, 60000);
     return () => clearInterval(interval);
-  }, []);
+  }, [monitorMode]);
 
   const fetchStats = async () => {
     try {
@@ -62,8 +63,26 @@ const Dashboard = () => {
 
   const fetchMachineMonitor = async (forceRefresh = false) => {
     try {
-      const res = await axios.get(`${API}/admin/machine-monitor${forceRefresh ? '?force_refresh=true' : ''}`);
-      setMachineMonitor(res.data);
+      const qs = forceRefresh ? '&force_refresh=true' : '';
+      
+      if (monitorMode === "api") {
+        // Try API-based endpoint first
+        try {
+          const res = await axios.get(`${API}/admin/machine-monitor?mode=api${qs}`);
+          if (res.data.success) {
+            setMachineMonitor(res.data);
+            return;
+          }
+        } catch (e) { /* fall through */ }
+        
+        // API failed — auto-fallback to watcher
+        const res = await axios.get(`${API}/admin/machine-monitor?mode=watcher${qs}`);
+        setMachineMonitor(res.data);
+      } else {
+        // Watcher mode directly
+        const res = await axios.get(`${API}/admin/machine-monitor?mode=watcher${qs}`);
+        setMachineMonitor(res.data);
+      }
     } catch (e) {
       console.error("Failed to load machine monitor");
     } finally {
@@ -192,19 +211,48 @@ const Dashboard = () => {
             </div>
             <div>
               <h2 className="text-xl font-bold text-white">Real-Time Machine Monitor</h2>
-              <p className="text-sm text-gray-500">Live worker status from ViaBTC</p>
+              <p className="text-sm text-gray-500">
+                {machineMonitor?.mode === "watcher" ? "Using watcher links" : machineMonitor?.mode === "api" ? "Using API keys" : "Live worker status from ViaBTC"}
+              </p>
             </div>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleRefreshMonitor}
-            disabled={refreshing}
-            className="border-[#27272A] hover:bg-[#27272A]"
-          >
-            <RefreshCw size={14} className={`mr-2 ${refreshing ? 'animate-spin' : ''}`} />
-            Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center bg-[#1A1A1A] border border-[#27272A] rounded-lg overflow-hidden">
+              <button
+                onClick={() => { setMonitorMode("api"); setMonitorLoading(true); }}
+                className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                  monitorMode === "api" 
+                    ? "bg-[#00E054] text-black" 
+                    : "text-gray-400 hover:text-white"
+                }`}
+                data-testid="monitor-mode-api"
+              >
+                API
+              </button>
+              <button
+                onClick={() => { setMonitorMode("watcher"); setMonitorLoading(true); }}
+                className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                  monitorMode === "watcher" 
+                    ? "bg-[#00E054] text-black" 
+                    : "text-gray-400 hover:text-white"
+                }`}
+                data-testid="monitor-mode-watcher"
+              >
+                Watcher
+              </button>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRefreshMonitor}
+              disabled={refreshing}
+              className="border-[#27272A] hover:bg-[#27272A]"
+              data-testid="monitor-refresh-btn"
+            >
+              <RefreshCw size={14} className={`mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+          </div>
         </div>
 
         {monitorLoading ? (
