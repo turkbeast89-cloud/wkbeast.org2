@@ -21,7 +21,7 @@ const Dashboard = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [showOnline, setShowOnline] = useState(false);  // Toggle for online machines
   const [expandedAccount, setExpandedAccount] = useState(null);  // Track which account is expanded
-  const [monitorMode, setMonitorMode] = useState("api");  // "api" or "watcher"
+  const [monitorMode, setMonitorMode] = useState("watcher");  // "api" or "watcher" - default watcher (bypasses Cloudflare)
 
   // Helper to format hashrate
   const formatHashrate = (hashrate, coin) => {
