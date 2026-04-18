@@ -1118,6 +1118,15 @@ async def test_viabtc_connection():
     
     settings = await db.viabtc_settings.find_one({"id": "viabtc_settings"}, {"_id": 0})
     
+    # Always fetch server IP for display
+    server_ip = "unknown"
+    try:
+        async with aiohttp.ClientSession() as ip_session:
+            async with ip_session.get("https://api.ipify.org", timeout=5) as ip_resp:
+                server_ip = (await ip_resp.text()).strip()
+    except:
+        pass
+    
     # Try watcher key first (bypasses Cloudflare)
     watcher_key = settings.get("watcher_key") if settings else None
     if watcher_key:
@@ -1133,21 +1142,24 @@ async def test_viabtc_connection():
                             "success": True,
                             "message": f"Watcher connection successful! Found {len(workers)} workers ({active} active).",
                             "mode": "watcher",
-                            "data": {"workers": len(workers), "active": active}
+                            "data": {"workers": len(workers), "active": active},
+                            "server_ip": server_ip
                         }
                     else:
                         return {
                             "success": False,
                             "error": data.get("message", "Unknown error"),
                             "message": f"Watcher key error: {data.get('message', 'Unknown')}",
-                            "mode": "watcher"
+                            "mode": "watcher",
+                            "server_ip": server_ip
                         }
         except Exception as e:
             return {
                 "success": False,
                 "error": str(e),
                 "message": f"Watcher connection failed: {str(e)}",
-                "mode": "watcher"
+                "mode": "watcher",
+                "server_ip": server_ip
             }
     
     # No watcher key - check if API keys exist
@@ -1155,7 +1167,8 @@ async def test_viabtc_connection():
         return {
             "success": False,
             "error": "No watcher key or API keys configured",
-            "message": "Add a Watcher Link from ViaBTC → Observer → Copy Link"
+            "message": "Add a Watcher Link from ViaBTC → Observer → Copy Link",
+            "server_ip": server_ip
         }
     
     try:
