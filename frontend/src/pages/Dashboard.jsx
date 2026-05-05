@@ -642,6 +642,23 @@ const Dashboard = () => {
           </div>
         </div>
       )}
+
+      {/* Full Database Backup */}
+      <div className="mt-6 flex justify-end">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            toast.info("Generating backup...");
+            window.open(`${API}/export/full-backup`, '_blank');
+          }}
+          className="border-[#27272A] hover:bg-[#27272A] text-gray-400 hover:text-white text-xs"
+          data-testid="full-backup-btn"
+        >
+          <ArrowDownRight size={14} className="mr-2" />
+          Export Full Backup
+        </Button>
+      </div>
     </div>
   );
 };

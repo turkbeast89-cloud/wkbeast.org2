@@ -713,6 +713,97 @@ async def export_excel():
         headers={"Content-Disposition": "attachment; filename=customers.xlsx"}
     )
 
+@api_router.get("/export/full-backup")
+async def export_full_backup():
+    """Export ALL database data as a single Excel file with multiple sheets"""
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    
+    # 1. Customers sheet
+    ws = wb.create_sheet("Customers")
+    ws.append(["Name", "Phone", "Machines", "Your Cost", "Customer Fee", "Status", "Prepaid Months", "Notes", "Created At"])
+    customers = await db.customers.find({}, {"_id": 0}).to_list(10000)
+    for c in customers:
+        machines_str = ", ".join([f"{m.get('quantity',1)}x {m.get('machine_name','?')}" for m in c.get("machines", [])])
+        ws.append([c.get("name",""), c.get("phone",""), machines_str, c.get("total_cost",0), c.get("total_fee",0), c.get("status",""), c.get("prepaid_months",0), c.get("notes",""), c.get("created_at","")])
+    
+    # 2. Payments sheet
+    ws2 = wb.create_sheet("Payments")
+    ws2.append(["Customer Name", "Month", "Amount", "Status", "Paid At", "Created At"])
+    payments = await db.payments.find({}, {"_id": 0}).to_list(50000)
+    for p in payments:
+        ws2.append([p.get("customer_name",""), p.get("month",""), p.get("amount",0), p.get("status",""), p.get("paid_at",""), p.get("created_at","")])
+    
+    # 3. Customer Accounts (Portal) sheet
+    ws3 = wb.create_sheet("Customer Accounts")
+    ws3.append(["Username", "Password", "Worker Name", "ViaBTC API Key", "Watcher Key", "Created At"])
+    accounts = await db.customer_accounts.find({}, {"_id": 0}).to_list(10000)
+    for a in accounts:
+        ws3.append([a.get("username",""), a.get("password",""), a.get("worker_name",""), a.get("viabtc_api_key",""), a.get("watcher_key",""), a.get("created_at","")])
+    
+    # 4. Machine Types sheet
+    ws4 = wb.create_sheet("Machine Types")
+    ws4.append(["Name", "Monthly Fee", "Daily Profit"])
+    mtypes = await db.machine_types.find({}, {"_id": 0}).to_list(100)
+    for mt in mtypes:
+        ws4.append([mt.get("name",""), mt.get("monthly_fee",0), mt.get("daily_profit",0)])
+    
+    # 5. Maintenance Logs sheet
+    ws5 = wb.create_sheet("Maintenance Logs")
+    ws5.append(["Customer ID", "Machine Info", "Description", "Date"])
+    logs = await db.maintenance_logs.find({}, {"_id": 0}).to_list(10000)
+    for l in logs:
+        ws5.append([l.get("customer_id",""), l.get("machine_info",""), l.get("description",""), l.get("date","")])
+    
+    # 6. Settings sheet
+    ws6 = wb.create_sheet("Settings")
+    ws6.append(["Key", "Value"])
+    settings = await db.settings.find_one({"id": "settings"}, {"_id": 0})
+    if settings:
+        for k, v in settings.items():
+            if k != "id":
+                ws6.append([k, str(v)])
+    
+    # 7. ViaBTC Settings sheet
+    ws7 = wb.create_sheet("ViaBTC Settings")
+    ws7.append(["Key", "Value"])
+    vbtc = await db.viabtc_settings.find_one({"id": "viabtc_settings"}, {"_id": 0})
+    if vbtc:
+        for k, v in vbtc.items():
+            if k != "id" and k != "secret_key":
+                ws7.append([k, str(v)])
+        if vbtc.get("secret_key"):
+            ws7.append(["secret_key", "****" + vbtc["secret_key"][-4:]])
+    
+    # 8. Farm Stats sheet
+    ws8 = wb.create_sheet("Farm Stats")
+    ws8.append(["Key", "Value"])
+    fstats = await db.farm_stats.find_one({"id": "farm_stats"}, {"_id": 0})
+    if fstats:
+        for k, v in fstats.items():
+            if k != "id":
+                ws8.append([k, str(v)])
+    
+    # Style all sheets - bold headers
+    from openpyxl.styles import Font
+    bold = Font(bold=True)
+    for sheet in wb.sheetnames:
+        for cell in wb[sheet][1]:
+            cell.font = bold
+    
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    
+    from datetime import datetime, timezone
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M")
+    
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename=wkbeast_full_backup_{timestamp}.xlsx"}
+    )
+
 # ==================== INIT DEFAULT MACHINE TYPES ====================
 
 @api_router.post("/init")
