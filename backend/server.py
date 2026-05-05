@@ -804,6 +804,212 @@ async def export_full_backup():
         headers={"Content-Disposition": f"attachment; filename=wkbeast_full_backup_{timestamp}.xlsx"}
     )
 
+@api_router.post("/import/full-backup")
+async def import_full_backup(file: UploadFile = File(...), mode: str = "merge"):
+    """Import a full backup Excel file. mode=merge (add/update) or mode=replace (wipe and restore)"""
+    contents = await file.read()
+    wb = openpyxl.load_workbook(BytesIO(contents))
+    
+    results = {}
+    
+    try:
+        # If replace mode, clear all collections first
+        if mode == "replace":
+            await db.customers.delete_many({})
+            await db.payments.delete_many({})
+            await db.customer_accounts.delete_many({})
+            await db.machine_types.delete_many({})
+            await db.maintenance_logs.delete_many({})
+            results["mode"] = "replace (all data cleared first)"
+        else:
+            results["mode"] = "merge (added to existing data)"
+        
+        # 1. Machine Types
+        if "Machine Types" in wb.sheetnames:
+            ws = wb["Machine Types"]
+            count = 0
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                if not row or not row[0]:
+                    continue
+                name = str(row[0]).strip()
+                fee = float(row[1]) if row[1] else 0
+                profit = float(row[2]) if len(row) > 2 and row[2] else 0
+                existing = await db.machine_types.find_one({"name": name})
+                if existing:
+                    await db.machine_types.update_one({"name": name}, {"$set": {"monthly_fee": fee, "daily_profit": profit}})
+                else:
+                    mt = MachineType(name=name, monthly_fee=fee, daily_profit=profit)
+                    await db.machine_types.insert_one(mt.model_dump())
+                count += 1
+            results["machine_types"] = count
+        
+        # 2. Customers
+        if "Customers" in wb.sheetnames:
+            ws = wb["Customers"]
+            machine_types_list = await db.machine_types.find({}, {"_id": 0}).to_list(100)
+            mt_map = {mt["name"].upper(): mt for mt in machine_types_list}
+            count = 0
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                if not row or not row[0]:
+                    continue
+                name = str(row[0]).strip()
+                phone = str(row[1]).strip() if row[1] else ""
+                machines_str = str(row[2]).strip() if row[2] else ""
+                cost = float(row[3]) if row[3] else 0
+                fee = float(row[4]) if row[4] else 0
+                status = str(row[5]).strip().lower() if row[5] else "active"
+                prepaid = int(row[6]) if row[6] else 0
+                notes = str(row[7]).strip() if len(row) > 7 and row[7] else ""
+                
+                # Parse machines
+                import re
+                machines = []
+                total_fee = 0
+                if machines_str:
+                    parts = re.findall(r'(\d+)\s*x\s*([a-zA-Z0-9\-_]+)', machines_str, re.IGNORECASE)
+                    for qty_str, mname in parts:
+                        qty = int(qty_str)
+                        normalized = normalize_machine_name(mname)
+                        if normalized in mt_map:
+                            mt = mt_map[normalized]
+                            machines.append({"machine_type_id": mt["id"], "machine_name": mt["name"], "quantity": qty})
+                            total_fee += mt["monthly_fee"] * qty
+                
+                if total_fee == 0:
+                    total_fee = fee
+                if status in ['paused', 'pause', 'inactive', 'off']:
+                    status = 'paused'
+                else:
+                    status = 'active'
+                
+                if mode == "merge":
+                    existing = await db.customers.find_one({"name": name, "phone": phone})
+                    if existing:
+                        await db.customers.update_one({"id": existing["id"]}, {"$set": {"machines": machines, "total_cost": cost, "total_fee": total_fee, "status": status, "prepaid_months": prepaid, "notes": notes}})
+                        count += 1
+                        continue
+                
+                customer = Customer(name=name, phone=phone, machines=machines, total_cost=cost, total_fee=total_fee, status=status, prepaid_months=prepaid, notes=notes)
+                await db.customers.insert_one(customer.model_dump())
+                count += 1
+            results["customers"] = count
+        
+        # 3. Payments
+        if "Payments" in wb.sheetnames:
+            ws = wb["Payments"]
+            count = 0
+            # Build customer name -> id map
+            all_customers = await db.customers.find({}, {"_id": 0}).to_list(10000)
+            cust_name_map = {c["name"]: c["id"] for c in all_customers}
+            
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                if not row or not row[0]:
+                    continue
+                cust_name = str(row[0]).strip()
+                month = str(row[1]).strip() if row[1] else ""
+                amount = float(row[2]) if row[2] else 0
+                status = str(row[3]).strip().lower() if row[3] else "unpaid"
+                paid_at = str(row[4]).strip() if row[4] else None
+                
+                cust_id = cust_name_map.get(cust_name, "")
+                
+                if mode == "merge" and cust_id:
+                    existing = await db.payments.find_one({"customer_id": cust_id, "month": month})
+                    if existing:
+                        await db.payments.update_one({"id": existing["id"]}, {"$set": {"amount": amount, "status": status, "paid_at": paid_at}})
+                        count += 1
+                        continue
+                
+                payment = Payment(customer_id=cust_id, customer_name=cust_name, month=month, amount=amount, status=status, paid_at=paid_at if paid_at and paid_at != "None" else None)
+                await db.payments.insert_one(payment.model_dump())
+                count += 1
+            results["payments"] = count
+        
+        # 4. Customer Accounts
+        if "Customer Accounts" in wb.sheetnames:
+            ws = wb["Customer Accounts"]
+            all_customers = await db.customers.find({}, {"_id": 0}).to_list(10000)
+            cust_name_map = {c["name"].lower(): c["id"] for c in all_customers}
+            count = 0
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                if not row or not row[0]:
+                    continue
+                username = str(row[0]).strip().lower()
+                password = str(row[1]).strip() if row[1] else ""
+                worker_name = str(row[2]).strip() if row[2] else ""
+                api_key = str(row[3]).strip() if len(row) > 3 and row[3] else ""
+                watcher_key = str(row[4]).strip() if len(row) > 4 and row[4] else ""
+                
+                # Find customer by username/worker_name
+                cust_id = cust_name_map.get(username, cust_name_map.get(worker_name.lower(), ""))
+                
+                if mode == "merge":
+                    existing = await db.customer_accounts.find_one({"username": username})
+                    if existing:
+                        update = {"password": password, "worker_name": worker_name}
+                        if api_key:
+                            update["viabtc_api_key"] = api_key
+                        if watcher_key:
+                            update["watcher_key"] = watcher_key
+                        await db.customer_accounts.update_one({"id": existing["id"]}, {"$set": update})
+                        count += 1
+                        continue
+                
+                account = CustomerAccount(customer_id=cust_id, username=username, password=password, worker_name=worker_name, viabtc_api_key=api_key)
+                doc = account.model_dump()
+                if watcher_key:
+                    doc["watcher_key"] = watcher_key
+                await db.customer_accounts.insert_one(doc)
+                count += 1
+            results["customer_accounts"] = count
+        
+        # 5. Maintenance Logs
+        if "Maintenance Logs" in wb.sheetnames:
+            ws = wb["Maintenance Logs"]
+            count = 0
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                if not row or not row[2]:
+                    continue
+                log = MaintenanceLog(customer_id=str(row[0] or ""), machine_info=str(row[1] or ""), description=str(row[2] or ""))
+                if row[3]:
+                    log.date = str(row[3])
+                await db.maintenance_logs.insert_one(log.model_dump())
+                count += 1
+            results["maintenance_logs"] = count
+        
+        # 6. Settings
+        if "Settings" in wb.sheetnames:
+            ws = wb["Settings"]
+            update_data = {}
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                if row and row[0] and row[1]:
+                    update_data[str(row[0])] = str(row[1])
+            if update_data:
+                await db.settings.update_one({"id": "settings"}, {"$set": update_data}, upsert=True)
+                results["settings"] = len(update_data)
+        
+        # 7. Farm Stats
+        if "Farm Stats" in wb.sheetnames:
+            ws = wb["Farm Stats"]
+            update_data = {}
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                if row and row[0] and row[1]:
+                    key = str(row[0])
+                    val = str(row[1])
+                    try:
+                        update_data[key] = int(val)
+                    except ValueError:
+                        update_data[key] = val
+            if update_data:
+                await db.farm_stats.update_one({"id": "farm_stats"}, {"$set": update_data}, upsert=True)
+                results["farm_stats"] = len(update_data)
+        
+    except Exception as e:
+        return {"success": False, "error": str(e), "results": results}
+    
+    return {"success": True, "message": "Backup imported successfully!", "results": results}
+
+
 # ==================== INIT DEFAULT MACHINE TYPES ====================
 
 @api_router.post("/init")

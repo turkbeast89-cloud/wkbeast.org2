@@ -644,7 +644,52 @@ const Dashboard = () => {
       )}
 
       {/* Full Database Backup */}
-      <div className="mt-6 flex justify-end">
+      <div className="mt-6 flex justify-end gap-2">
+        <input
+          type="file"
+          id="backup-import"
+          accept=".xlsx"
+          className="hidden"
+          onChange={async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const mode = window.confirm(
+              "Choose import mode:\n\nOK = MERGE (add to existing data, update duplicates)\nCancel = REPLACE (wipe everything and restore from backup)"
+            ) ? "merge" : "replace";
+            if (mode === "replace" && !window.confirm("WARNING: This will DELETE all existing data and replace with backup. Are you sure?")) {
+              e.target.value = "";
+              return;
+            }
+            const formData = new FormData();
+            formData.append("file", file);
+            toast.info("Importing backup...");
+            try {
+              const res = await axios.post(`${API}/import/full-backup?mode=${mode}`, formData);
+              if (res.data.success) {
+                const r = res.data.results;
+                const summary = Object.entries(r).filter(([k]) => k !== "mode").map(([k, v]) => `${k}: ${v}`).join(", ");
+                toast.success(`Import complete (${r.mode}): ${summary}`);
+                fetchStats();
+                fetchMachineMonitor(true);
+              } else {
+                toast.error(`Import failed: ${res.data.error}`);
+              }
+            } catch (err) {
+              toast.error("Import failed: " + (err.response?.data?.detail || err.message));
+            }
+            e.target.value = "";
+          }}
+        />
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => document.getElementById("backup-import").click()}
+          className="border-[#27272A] hover:bg-[#27272A] text-gray-400 hover:text-white text-xs"
+          data-testid="import-backup-btn"
+        >
+          <ArrowUpRight size={14} className="mr-2" />
+          Import Backup
+        </Button>
         <Button
           variant="outline"
           size="sm"
