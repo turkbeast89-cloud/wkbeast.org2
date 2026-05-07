@@ -33,7 +33,7 @@ CONFIG_FILE = os.path.join(SCRIPT_DIR, "wkbeast_config.json")
 # ================================
 
 
-def send_cgminer_command(ip, command, port=4028, timeout=5):
+def send_cgminer_command(ip, command, port=4028, timeout=3):
     """Send a command to CGMiner API"""
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -142,8 +142,6 @@ def get_machine_data():
         if not ip:
             continue
         
-        details = get_miner_details(ip)
-        
         machine = {
             "ip": ip,
             "worker_name": miner.get("name", ""),
@@ -151,20 +149,34 @@ def get_machine_data():
             "status": miner.get("status", "unknown"),
             "model": miner.get("type", "Unknown"),
             "farm": FARM_NAME,
+            "temperature": 0,
+            "fan_speed": 0,
+            "power": 0,
+            "uptime": "",
+            "pool": "",
         }
         
-        if details:
-            machine["temperature"] = details.get("temperature", 0)
-            machine["fan_speed"] = details.get("fan_speed", 0)
-            machine["power"] = details.get("power", 0)
-            machine["uptime"] = details.get("uptime", "")
-            machine["pool"] = details.get("pool", "")
-            if details.get("worker_name"):
-                machine["worker_name"] = details["worker_name"]
-            if details.get("model"):
-                machine["model"] = details["model"]
+        # Try to get live details (quick timeout, don't block)
+        try:
+            details = get_miner_details(ip)
+            if details:
+                machine["temperature"] = details.get("temperature", 0)
+                machine["fan_speed"] = details.get("fan_speed", 0)
+                machine["power"] = details.get("power", 0)
+                machine["uptime"] = details.get("uptime", "")
+                machine["pool"] = details.get("pool", "")
+                if details.get("worker_name"):
+                    machine["worker_name"] = details["worker_name"]
+                if details.get("model"):
+                    machine["model"] = details["model"]
+        except:
+            pass
         
         machines.append(machine)
+        
+        # Print progress every 10 machines
+        if len(machines) % 10 == 0:
+            print(f"  Scanned {len(machines)}/{len(miners)} miners...")
     
     return machines
 
