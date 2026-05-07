@@ -23,7 +23,7 @@ const Dashboard = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [showOnline, setShowOnline] = useState(false);  // Toggle for online machines
   const [expandedAccount, setExpandedAccount] = useState(null);  // Track which account is expanded
-  const [monitorMode, setMonitorMode] = useState("watcher");  // "api" or "watcher" - default watcher (bypasses Cloudflare)
+  const [monitorMode, setMonitorMode] = useState("api");  // "api" or "watcher" - default api
   const [overdueData, setOverdueData] = useState(null);
   const [liveMachines, setLiveMachines] = useState([]);
   const [liveMachinesLoading, setLiveMachinesLoading] = useState(false);
