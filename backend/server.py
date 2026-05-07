@@ -499,6 +499,99 @@ async def get_overdue_payments():
 
 
 
+
+# ==================== MACHINE DATA SYNC (from PC app) ====================
+
+@api_router.post("/machine-data/push")
+async def push_machine_data(data: dict):
+    """Receive machine data from the PC monitoring app"""
+    api_key = data.get("api_key", "")
+    
+    # Simple API key auth
+    expected_key = os.environ.get("MACHINE_SYNC_KEY", "wkbeast2025sync")
+    if api_key != expected_key:
+        raise HTTPException(status_code=403, detail="Invalid API key")
+    
+    machines = data.get("machines", [])
+    if not machines:
+        return {"success": False, "error": "No machine data"}
+    
+    # Store each machine's data
+    for m in machines:
+        ip = m.get("ip", "")
+        if not ip:
+            continue
+        await db.machine_live_data.update_one(
+            {"ip": ip},
+            {"$set": {
+                "ip": ip,
+                "worker_name": m.get("worker_name", ""),
+                "hashrate": m.get("hashrate", 0),
+                "temperature": m.get("temperature", 0),
+                "fan_speed": m.get("fan_speed", 0),
+                "power": m.get("power", 0),
+                "status": m.get("status", "online"),
+                "model": m.get("model", ""),
+                "uptime": m.get("uptime", ""),
+                "pool": m.get("pool", ""),
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }},
+            upsert=True
+        )
+    
+    return {"success": True, "synced": len(machines)}
+
+@api_router.get("/machine-data/live")
+async def get_live_machine_data():
+    """Get all live machine data pushed from PC app"""
+    machines = await db.machine_live_data.find({}, {"_id": 0}).to_list(10000)
+    return machines
+
+@api_router.get("/machine-data/commands")
+async def get_pending_commands(api_key: str = ""):
+    """PC app polls this to check for commands to execute"""
+    expected_key = os.environ.get("MACHINE_SYNC_KEY", "wkbeast2025sync")
+    if api_key != expected_key:
+        raise HTTPException(status_code=403, detail="Invalid API key")
+    
+    commands = await db.machine_commands.find({"status": "pending"}, {"_id": 0}).to_list(100)
+    return commands
+
+@api_router.post("/machine-data/command")
+async def create_machine_command(data: dict):
+    """Create a command for the PC app to execute (reboot, change worker, etc.)"""
+    cmd = {
+        "id": str(uuid.uuid4()),
+        "ip": data.get("ip", ""),
+        "action": data.get("action", "reboot"),  # reboot, change_worker, change_pool
+        "params": data.get("params", {}),
+        "status": "pending",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "completed_at": None,
+        "result": None
+    }
+    await db.machine_commands.insert_one(cmd)
+    return {"success": True, "command_id": cmd["id"]}
+
+@api_router.post("/machine-data/command-done")
+async def complete_command(data: dict):
+    """PC app reports a command was executed"""
+    api_key = data.get("api_key", "")
+    expected_key = os.environ.get("MACHINE_SYNC_KEY", "wkbeast2025sync")
+    if api_key != expected_key:
+        raise HTTPException(status_code=403, detail="Invalid API key")
+    
+    await db.machine_commands.update_one(
+        {"id": data.get("command_id")},
+        {"$set": {
+            "status": "completed",
+            "result": data.get("result", "OK"),
+            "completed_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    return {"success": True}
+
+
 # ==================== REPAIRS ====================
 
 @api_router.get("/repairs")
