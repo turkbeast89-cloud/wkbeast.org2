@@ -241,7 +241,7 @@ const CustomerDashboard = ({ session, onLogout }) => {
   // Check for pending payment this month
   const currentMonth = new Date().toISOString().slice(0, 7); // e.g., "2026-03"
   const currentMonthPayment = payments?.find(p => p.month === currentMonth);
-  const hasPendingPayment = currentMonthPayment?.status === "unpaid" && (customer?.total_fee > 0);
+  const hasPendingPayment = currentMonthPayment?.status === "unpaid" && currentMonthPayment?.amount > 0;
   const isPaid = currentMonthPayment?.status === "paid";
   
   // Get payment deadline based on payment status
