@@ -543,9 +543,30 @@ async def push_machine_data(data: dict):
 
 @api_router.get("/machine-data/live")
 async def get_live_machine_data():
-    """Get all live machine data pushed from PC app"""
+    """Get live machine data - only machines that match a customer's worker name"""
     machines = await db.machine_live_data.find({}, {"_id": 0}).to_list(10000)
-    return machines
+    
+    # Get all customer worker names
+    accounts = await db.customer_accounts.find({}, {"_id": 0, "worker_name": 1}).to_list(10000)
+    customer_workers = set()
+    for acc in accounts:
+        wn = acc.get("worker_name", "").lower().strip()
+        if wn:
+            customer_workers.add(wn)
+    
+    # Filter: only show machines whose worker_name contains a customer worker name
+    filtered = []
+    for m in machines:
+        worker = m.get("worker_name", "").lower().strip()
+        if not worker:
+            continue
+        # Check if any customer worker name is in this machine's worker name
+        for cw in customer_workers:
+            if cw in worker or worker in cw:
+                filtered.append(m)
+                break
+    
+    return filtered
 
 @api_router.get("/machine-data/commands")
 async def get_pending_commands(api_key: str = ""):
