@@ -3074,9 +3074,6 @@ async def notify_offline_machines(admin_phone: str = "+9613022005"):
         machines = c.get("machines", [])
         if len(machines) == 1:
             customer_machine_info[c["id"]] = machines[0].get("machine_name", "Unknown")
-        elif len(machines) > 1:
-            info_parts = [f"{m.get('quantity',1)}x {m.get('machine_name','')}" for m in machines]
-            customer_machine_info[c["id"]] = ", ".join(info_parts)
         else:
             customer_machine_info[c["id"]] = "Unknown"
     
@@ -3402,10 +3399,6 @@ async def _check_offline_and_alert():
         machines = c.get("machines", [])
         if len(machines) == 1:
             customer_machine_info[c["id"]] = machines[0].get("machine_name", "Unknown")
-        elif len(machines) > 1:
-            # Multiple machine types - show count per type
-            info_parts = [f"{m.get('quantity',1)}x {m.get('machine_name','')}" for m in machines]
-            customer_machine_info[c["id"]] = ", ".join(info_parts)
         else:
             customer_machine_info[c["id"]] = "Unknown"
     
