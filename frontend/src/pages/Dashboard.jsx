@@ -5,7 +5,8 @@ import { toast } from "sonner";
 import { 
   DollarSign, TrendingUp, Users, Cpu, AlertCircle, 
   ArrowUpRight, ArrowDownRight, Pause, RefreshCw, Wifi, WifiOff,
-  AlertTriangle, Server, ChevronDown, ChevronUp
+  AlertTriangle, Server, ChevronDown, ChevronUp, Thermometer, 
+  Fan, Power, RotateCcw, Monitor, Zap
 } from "lucide-react";
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, 
@@ -23,6 +24,8 @@ const Dashboard = () => {
   const [expandedAccount, setExpandedAccount] = useState(null);  // Track which account is expanded
   const [monitorMode, setMonitorMode] = useState("watcher");  // "api" or "watcher" - default watcher (bypasses Cloudflare)
   const [overdueData, setOverdueData] = useState(null);
+  const [liveMachines, setLiveMachines] = useState([]);
+  const [liveMachinesLoading, setLiveMachinesLoading] = useState(false);
 
   // Helper to format hashrate
   const formatHashrate = (hashrate, coin) => {
@@ -46,16 +49,25 @@ const Dashboard = () => {
     fetchStats();
     fetchMachineMonitor();
     fetchOverdue();
+    fetchLiveMachines();
     
     // Auto-refresh machine monitor every 60 seconds
     const interval = setInterval(fetchMachineMonitor, 60000);
-    return () => clearInterval(interval);
+    const interval2 = setInterval(fetchLiveMachines, 120000);
+    return () => { clearInterval(interval); clearInterval(interval2); };
   }, [monitorMode]);
 
   const fetchOverdue = async () => {
     try {
       const res = await axios.get(`${API}/payments/overdue`);
       setOverdueData(res.data);
+    } catch (e) {}
+  };
+
+  const fetchLiveMachines = async () => {
+    try {
+      const res = await axios.get(`${API}/machine-data/live`);
+      setLiveMachines(res.data);
     } catch (e) {}
   };
 
@@ -667,6 +679,139 @@ const Dashboard = () => {
           )}
         </div>
       </div>
+
+      {/* Live Machine Data (from PC Sync) */}
+      {liveMachines.length > 0 && (
+        <div className="bg-[#0F0F0F] rounded-xl border border-[#27272A] p-6" data-testid="live-machine-data">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-cyan-500/10">
+                <Monitor className="text-cyan-400" size={20} />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-white">Live Machine Control Panel</h2>
+                <p className="text-sm text-gray-500">
+                  {liveMachines.length} machines synced from MineFleet
+                  {liveMachines[0]?.updated_at && (
+                    <span> &middot; Last sync: {new Date(liveMachines[0].updated_at).toLocaleTimeString()}</span>
+                  )}
+                </p>
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => { setLiveMachinesLoading(true); fetchLiveMachines().finally(() => setLiveMachinesLoading(false)); }}
+              className="border-[#27272A] hover:bg-[#27272A]"
+              data-testid="refresh-live-machines"
+            >
+              <RefreshCw size={14} className={`mr-2 ${liveMachinesLoading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+          </div>
+
+          {/* Stats summary */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <div className="bg-[#0A0A0A] rounded-lg p-3 border border-[#27272A]">
+              <p className="text-xs text-gray-500">Online</p>
+              <p className="text-xl font-bold text-[#00E054]">{liveMachines.filter(m => m.status === 'online').length}</p>
+            </div>
+            <div className="bg-[#0A0A0A] rounded-lg p-3 border border-[#27272A]">
+              <p className="text-xs text-gray-500">Offline / Crashed</p>
+              <p className="text-xl font-bold text-red-400">{liveMachines.filter(m => m.status !== 'online').length}</p>
+            </div>
+            <div className="bg-[#0A0A0A] rounded-lg p-3 border border-[#27272A]">
+              <p className="text-xs text-gray-500">Avg Temperature</p>
+              <p className="text-xl font-bold text-orange-400">
+                {liveMachines.filter(m => m.temperature > 0).length > 0 
+                  ? Math.round(liveMachines.filter(m => m.temperature > 0).reduce((s, m) => s + m.temperature, 0) / liveMachines.filter(m => m.temperature > 0).length)
+                  : 0}°C
+              </p>
+            </div>
+            <div className="bg-[#0A0A0A] rounded-lg p-3 border border-[#27272A]">
+              <p className="text-xs text-gray-500">Total Hashrate</p>
+              <p className="text-xl font-bold text-cyan-400">
+                {liveMachines.reduce((s, m) => s + (m.hashrate || 0), 0).toFixed(1)} GH/s
+              </p>
+            </div>
+          </div>
+
+          {/* Machine table */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[#27272A]">
+                  <th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">Status</th>
+                  <th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">IP</th>
+                  <th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">Worker</th>
+                  <th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">Model</th>
+                  <th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">Hashrate</th>
+                  <th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">Temp</th>
+                  <th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">Fan</th>
+                  <th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">Power</th>
+                  <th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">Uptime</th>
+                  <th className="text-right py-2 px-3 text-xs text-gray-500 font-medium">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {liveMachines
+                  .sort((a, b) => (a.status === 'online' ? 1 : -1) - (b.status === 'online' ? 1 : -1))
+                  .map((m, idx) => {
+                    const isOnline = m.status === 'online';
+                    const isHot = m.temperature > 80;
+                    return (
+                      <tr key={m.ip || idx} className="border-b border-[#27272A]/50 hover:bg-[#1A1A1A] transition-colors">
+                        <td className="py-2 px-3">
+                          <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${
+                            isOnline ? 'bg-[#00E054]/10 text-[#00E054]' : 
+                            m.status === 'crashed' ? 'bg-red-500/10 text-red-400' :
+                            'bg-gray-500/10 text-gray-400'
+                          }`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-[#00E054]' : m.status === 'crashed' ? 'bg-red-400' : 'bg-gray-400'}`} />
+                            {m.status || 'unknown'}
+                          </span>
+                        </td>
+                        <td className="py-2 px-3 font-mono text-xs text-gray-300">{m.ip}</td>
+                        <td className="py-2 px-3 text-white font-medium text-xs">{m.worker_name || '—'}</td>
+                        <td className="py-2 px-3 text-gray-400 text-xs">{m.model || '—'}</td>
+                        <td className="py-2 px-3 text-cyan-400 font-mono text-xs">{m.hashrate ? `${m.hashrate.toFixed(1)} GH/s` : '—'}</td>
+                        <td className={`py-2 px-3 font-mono text-xs ${isHot ? 'text-red-400' : m.temperature > 0 ? 'text-orange-400' : 'text-gray-500'}`}>
+                          {m.temperature > 0 ? `${m.temperature}°C` : '—'}
+                          {isHot && ' 🔥'}
+                        </td>
+                        <td className="py-2 px-3 text-gray-400 font-mono text-xs">{m.fan_speed > 0 ? `${m.fan_speed} RPM` : '—'}</td>
+                        <td className="py-2 px-3 text-gray-400 font-mono text-xs">{m.power > 0 ? `${m.power}W` : '—'}</td>
+                        <td className="py-2 px-3 text-gray-500 text-xs">{m.uptime || '—'}</td>
+                        <td className="py-2 px-3 text-right">
+                          <button
+                            onClick={async () => {
+                              if (!window.confirm(`Reboot machine at ${m.ip}?`)) return;
+                              try {
+                                const res = await axios.post(`${API}/machine-data/command`, { ip: m.ip, action: 'reboot' });
+                                if (res.data.success) toast.success(`Reboot command queued for ${m.ip}`);
+                                else toast.error('Failed to queue command');
+                              } catch (e) { toast.error('Failed'); }
+                            }}
+                            className="text-xs bg-red-500/10 text-red-400 hover:bg-red-500/20 px-2 py-1 rounded transition-colors"
+                            data-testid={`reboot-${m.ip}`}
+                          >
+                            <RotateCcw size={12} className="inline mr-1" />
+                            Reboot
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
+          
+          {/* No data notice */}
+          {liveMachines.length === 0 && (
+            <p className="text-center text-gray-500 py-8">No machine data yet. Run wkbeast_sync.py on your PC to start syncing.</p>
+          )}
+        </div>
+      )}
 
       {/* Machine Counter Breakdown */}
       {machineData.length > 0 && (
