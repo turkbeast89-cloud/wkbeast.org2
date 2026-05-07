@@ -3189,7 +3189,10 @@ Unlike other farms, we don't request payments 6 months in advance — but we kin
 Thank you for your continued trust and support. Your timely payment helps us keep everything running smoothly.
 
 Warm regards,
-{team} 🐺💼"""
+{team} 🐺💼
+
+━━━━━━━━━━━━━━━
+🤖 This is an automated message. Please do not reply to this number. For questions, contact us directly."""
 
         # Day 2: Reminder
         elif day == 2:
@@ -3203,7 +3206,10 @@ Please settle it at your earliest convenience:
 • USDT (BEP20): {usdt}
 
 Thank you!
-{team}"""
+{team}
+
+━━━━━━━━━━━━━━━
+🤖 This is an automated message. Please do not reply to this number. For questions, contact us directly."""
 
         # Day 3: Final warning
         elif day == 3:
@@ -3220,7 +3226,10 @@ To avoid service interruption, please pay now:
 
 If you have already paid, please ignore this message.
 
-{team}"""
+{team}
+
+━━━━━━━━━━━━━━━
+🤖 This is an automated message. Please do not reply to this number. For questions, contact us directly."""
 
         # Day 4+: Short reminder every 3 days
         else:
@@ -3230,7 +3239,10 @@ If you have already paid, please ignore this message.
 • Whish: {whish}
 • USDT (BEP20): {usdt}
 
-{team}"""
+{team}
+
+━━━━━━━━━━━━━━━
+🤖 This is an automated message. Please do not reply to this number. For questions, contact us directly."""
         
         try:
             client_tw.messages.create(
@@ -3238,8 +3250,29 @@ If you have already paid, please ignore this message.
                 from_=get_whatsapp_from(),
                 to=f"whatsapp:{phone_clean}"
             )
+            # Log message to DB
+            await db.whatsapp_logs.insert_one({
+                "customer_id": payment.get("customer_id", ""),
+                "customer_name": customer.get("name", ""),
+                "phone": phone_clean,
+                "message": message,
+                "type": message_type,
+                "direction": "outbound",
+                "status": "sent",
+                "created_at": now.isoformat()
+            })
             sent += 1
-        except:
+        except Exception as e:
+            await db.whatsapp_logs.insert_one({
+                "customer_id": payment.get("customer_id", ""),
+                "customer_name": customer.get("name", ""),
+                "phone": phone_clean,
+                "message": message,
+                "type": message_type,
+                "direction": "outbound",
+                "status": f"failed: {str(e)}",
+                "created_at": now.isoformat()
+            })
             failed += 1
     
     # Update last sent timestamp
@@ -3373,6 +3406,35 @@ async def _check_offline_and_alert():
         "back_online": len(back_online),
         "messages_sent": messages_sent
     }
+
+
+# ==================== WHATSAPP MESSAGE HISTORY ====================
+
+@api_router.get("/whatsapp/history")
+async def get_whatsapp_history(customer_id: str = None, limit: int = 100):
+    """Get WhatsApp message history, optionally filtered by customer"""
+    query = {}
+    if customer_id:
+        query["customer_id"] = customer_id
+    
+    logs = await db.whatsapp_logs.find(query, {"_id": 0}).sort("created_at", -1).to_list(limit)
+    return logs
+
+@api_router.get("/whatsapp/history/all")
+async def get_all_whatsapp_history():
+    """Get all WhatsApp message history grouped by customer"""
+    logs = await db.whatsapp_logs.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    
+    # Group by customer
+    by_customer = {}
+    for log in logs:
+        cname = log.get("customer_name", "Unknown")
+        if cname not in by_customer:
+            by_customer[cname] = {"customer_name": cname, "customer_id": log.get("customer_id", ""), "phone": log.get("phone", ""), "messages": []}
+        by_customer[cname]["messages"].append(log)
+    
+    return list(by_customer.values())
+
 
 # ==================== BACKGROUND SCHEDULER ====================
 

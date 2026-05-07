@@ -60,10 +60,12 @@ const AdminPanel = () => {
   const [botSettings, setBotSettings] = useState({
     auto_reminders_enabled: false,
     offline_alerts_enabled: false,
-    admin_phone: "+905464678877",
+    admin_phone: "+9613022005",
     reminder_day: 1,
     reminder_interval_days: 3
   });
+  const [messageHistory, setMessageHistory] = useState(null);
+  const [expandedHistory, setExpandedHistory] = useState(null);
 
   useEffect(() => {
     fetchData();
@@ -750,6 +752,65 @@ const AdminPanel = () => {
             Test WhatsApp
           </Button>
         </div>
+      </div>
+
+      {/* WhatsApp Message History */}
+      <div className="card p-6" data-testid="whatsapp-history">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <MessageSquare className="text-[#25D366]" size={20} />
+            <h2 className="text-lg font-bold text-white">Message History</h2>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-[#27272A] text-xs"
+            onClick={async () => {
+              try {
+                const res = await axios.get(`${API}/whatsapp/history/all`);
+                setMessageHistory(res.data);
+              } catch (e) { toast.error("Failed to load history"); }
+            }}
+            data-testid="load-history-btn"
+          >
+            Load History
+          </Button>
+        </div>
+        {messageHistory && messageHistory.length > 0 ? (
+          <div className="space-y-2 max-h-[400px] overflow-y-auto">
+            {messageHistory.map((cust, idx) => (
+              <div key={idx} className="bg-[#0A0A0A] rounded-lg border border-[#27272A]">
+                <button
+                  onClick={() => setExpandedHistory(expandedHistory === idx ? null : idx)}
+                  className="w-full flex items-center justify-between p-3 text-left"
+                >
+                  <div>
+                    <span className="text-sm font-medium text-white">{cust.customer_name}</span>
+                    <span className="text-xs text-gray-500 ml-2">{cust.phone}</span>
+                  </div>
+                  <span className="text-xs text-gray-500">{cust.messages.length} messages</span>
+                </button>
+                {expandedHistory === idx && (
+                  <div className="px-3 pb-3 space-y-2 border-t border-[#27272A] pt-2">
+                    {cust.messages.slice(0, 10).map((msg, mi) => (
+                      <div key={mi} className={`text-xs p-2 rounded ${msg.status === 'sent' ? 'bg-[#1A1A1A]' : 'bg-red-900/20'}`}>
+                        <div className="flex justify-between mb-1">
+                          <span className={`font-medium ${msg.status === 'sent' ? 'text-[#25D366]' : 'text-red-400'}`}>
+                            {msg.type} • {msg.status}
+                          </span>
+                          <span className="text-gray-500">{new Date(msg.created_at).toLocaleDateString()}</span>
+                        </div>
+                        <p className="text-gray-400 whitespace-pre-wrap line-clamp-3">{msg.message.substring(0, 150)}...</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500">No messages sent yet. Click "Load History" to view sent messages.</p>
+        )}
       </div>
 
       {/* Maintenance Logs */}
