@@ -2618,6 +2618,14 @@ async def get_machine_monitor_watcher(force_refresh: bool = False):
         except Exception as e:
             return {"workers": [], "error": str(e)}
     
+    # Get machine IPs from live data (pushed by PC sync)
+    live_machines_data = await db.machine_live_data.find({}, {"_id": 0, "worker_name": 1, "ip": 1}).to_list(10000)
+    worker_to_ip_map = {}
+    for lm in live_machines_data:
+        wn = lm.get("worker_name", "").lower().strip()
+        if wn and lm.get("ip"):
+            worker_to_ip_map[wn] = lm["ip"]
+    
     account_stats = []
     api_errors = []
     
@@ -3094,11 +3102,13 @@ async def get_machine_monitor(force_refresh: bool = False, mode: str = "api"):
                     })
                 
                 for ow in result["offline_workers"]:
+                    machine_ip = worker_to_ip_map.get(ow["name"].lower(), worker_to_ip_map.get(worker_name.lower(), ""))
                     all_offline_details.append({
                         "worker": display_name, "worker_name": worker_name,
                         "machine_name": ow["name"], "coin": ow["coin"],
                         "reason": ow.get("status", "offline"),
-                        "last_active": ow.get("last_active", 0)
+                        "last_active": ow.get("last_active", 0),
+                        "ip": machine_ip
                     })
     
     total_online = ltc_total_online + kas_total_online
@@ -3799,6 +3809,14 @@ async def _check_offline_and_alert(force_send=False):
     for acc in customer_accounts:
         account_to_customer_id[acc.get("worker_name", "")] = acc.get("customer_id", "")
     
+    # Get machine IPs from live data (pushed by PC sync)
+    live_machines = await db.machine_live_data.find({}, {"_id": 0, "worker_name": 1, "ip": 1}).to_list(10000)
+    worker_to_ip = {}
+    for lm in live_machines:
+        wn = lm.get("worker_name", "").lower().strip()
+        if wn and lm.get("ip"):
+            worker_to_ip[wn] = lm["ip"]
+    
     current_offline = set()
     offline_details = []
     
@@ -3826,6 +3844,9 @@ async def _check_offline_and_alert(force_send=False):
                                 current_offline.add(worker_id)
                                 last_active = w.get("last_active", 0)
                                 
+                                # Look up IP from live data
+                                machine_ip = worker_to_ip.get(wname.lower(), worker_to_ip.get(worker_name.lower(), ""))
+                                
                                 import time as t
                                 offline_mins = int((t.time() - last_active) / 60) if last_active else 0
                                 offline_details.append({
@@ -3833,6 +3854,7 @@ async def _check_offline_and_alert(force_send=False):
                                     "name": wname,
                                     "account": display_name,
                                     "machine_type": machine_info,
+                                    "machine_ip": machine_ip,
                                     "minutes_offline": offline_mins
                                 })
             except:
@@ -3857,7 +3879,8 @@ async def _check_offline_and_alert(force_send=False):
         for worker_id in newly_offline:
             detail = next((d for d in offline_details if d["worker_id"] == worker_id), None)
             if detail:
-                details += f"❌ {detail['name']} ({detail['account']})\n"
+                ip_str = f" | IP: {detail['machine_ip']}" if detail.get('machine_ip') else ""
+                details += f"❌ {detail['name']} ({detail['account']}){ip_str}\n"
             else:
                 details += f"❌ {worker_id}\n"
         

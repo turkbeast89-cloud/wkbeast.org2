@@ -511,6 +511,9 @@ const Dashboard = () => {
                         <div>
                           <span className="text-sm text-white font-medium">{detail.machine_name || detail.worker}</span>
                           <span className="text-xs text-gray-500 ml-2">({detail.worker})</span>
+                          {detail.ip && (
+                            <span className="text-xs text-cyan-400 ml-2 font-mono">{detail.ip}</span>
+                          )}
                           {offlineDuration && (
                             <div className="text-xs text-[#EF4444]/80 mt-0.5">Offline since {offlineDuration}</div>
                           )}
