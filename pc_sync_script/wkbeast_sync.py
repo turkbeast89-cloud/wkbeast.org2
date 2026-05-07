@@ -33,14 +33,20 @@ CONFIG_FILE = os.path.join(SCRIPT_DIR, "wkbeast_config.json")
 # ================================
 
 
-def send_cgminer_command(ip, command, port=4028, timeout=3):
-    """Send a command to CGMiner API"""
+def send_cgminer_command(ip, command, parameter=None, port=4028, timeout=3):
+    """Send a command to CGMiner API.
+    Correct CGMiner protocol: {"command": "addpool", "parameter": "url,user,pass"}
+    NOT {"command": "addpool|url,user,pass"} (that's a common mistake).
+    """
     try:
+        payload = {"command": command}
+        if parameter is not None:
+            payload["parameter"] = parameter
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(timeout)
         sock.connect((ip, port))
-        sock.send(json.dumps({"command": command}).encode() + b'\n')
-        
+        sock.send(json.dumps(payload).encode() + b'\n')
+
         response = b''
         while True:
             chunk = sock.recv(4096)
@@ -49,10 +55,10 @@ def send_cgminer_command(ip, command, port=4028, timeout=3):
             response += chunk
             if b'\x00' in chunk:
                 break
-        
+
         sock.close()
         return json.loads(response.decode().replace('\x00', ''))
-    except:
+    except Exception:
         return None
 
 
@@ -223,12 +229,153 @@ def check_commands():
         print(f"[CMD ERROR] {e}")
 
 
+def _http_auth_request(method, url, **kwargs):
+    """Try HTTP Digest auth first, fall back to Basic. Returns (response, auth_name)."""
+    from requests.auth import HTTPDigestAuth, HTTPBasicAuth
+    last_err = None
+    for auth_name, auth in [("Digest", HTTPDigestAuth(MINER_USER, MINER_PASS)),
+                            ("Basic", HTTPBasicAuth(MINER_USER, MINER_PASS))]:
+        try:
+            r = requests.request(method, url, auth=auth, **kwargs)
+            # 401 means wrong auth scheme - try the next one
+            if r.status_code != 401:
+                return r, auth_name
+            last_err = f"HTTP 401 with {auth_name}"
+        except Exception as e:
+            last_err = f"{auth_name} failed: {e}"
+    raise Exception(last_err or "All auth attempts failed")
+
+
+def antminer_get_conf(ip, timeout=15):
+    """GET miner config via Antminer web UI. Returns parsed JSON config or None."""
+    try:
+        r, auth_name = _http_auth_request("GET", f"http://{ip}/cgi-bin/get_miner_conf.cgi", timeout=timeout)
+        if r.status_code == 200:
+            try:
+                return r.json(), auth_name
+            except Exception:
+                # Some firmwares prepend JS or non-JSON noise
+                txt = r.text.strip()
+                start = txt.find("{")
+                end = txt.rfind("}")
+                if start != -1 and end != -1:
+                    return json.loads(txt[start:end + 1]), auth_name
+        return None, auth_name
+    except Exception as e:
+        print(f"  [HTTP] get_miner_conf failed on {ip}: {e}")
+        return None, None
+
+
+def antminer_set_conf(ip, conf, auth_name="Digest", timeout=15):
+    """POST miner config via Antminer web UI. Returns (ok, status_code, body)."""
+    from requests.auth import HTTPDigestAuth, HTTPBasicAuth
+    auth = HTTPDigestAuth(MINER_USER, MINER_PASS) if auth_name == "Digest" else HTTPBasicAuth(MINER_USER, MINER_PASS)
+    url = f"http://{ip}/cgi-bin/set_miner_conf.cgi"
+
+    # Most Antminer firmwares accept JSON body with the FULL config dict.
+    try:
+        r = requests.post(url, auth=auth, json=conf, timeout=timeout)
+        if r.status_code == 200:
+            return True, 200, r.text[:200]
+        if r.status_code != 401:
+            # Try form-encoded as a fallback (very old firmware)
+            form = {}
+            pools = conf.get("pools", [])
+            for i, p in enumerate(pools, start=1):
+                form[f"_ant_pool{i}url"] = p.get("url", "")
+                form[f"_ant_pool{i}user"] = p.get("user", "")
+                form[f"_ant_pool{i}pw"] = p.get("pass", "")
+            for k, v in conf.items():
+                if k != "pools":
+                    form[f"_ant_{k}"] = "true" if v is True else ("false" if v is False else v)
+            r2 = requests.post(url, auth=auth, data=form, timeout=timeout)
+            return (r2.status_code == 200), r2.status_code, r2.text[:200]
+        return False, r.status_code, r.text[:200]
+    except Exception as e:
+        return False, 0, str(e)
+
+
+def change_worker_via_http(ip, new_worker, pool_url=""):
+    """Update worker name on all pool entries via Antminer web UI (persistent)."""
+    conf, auth_name = antminer_get_conf(ip)
+    if not conf or "pools" not in conf:
+        return False, "Could not read miner config (firmware not Antminer-compatible?)"
+
+    pools = conf.get("pools", [])
+    if not pools:
+        return False, "Miner has no pools configured"
+
+    # Mutate every pool's user to the new worker name. Keep URLs unless pool_url given.
+    for p in pools:
+        if pool_url:
+            p["url"] = pool_url
+        p["user"] = new_worker
+        # Keep existing password, default to "x" if missing
+        if not p.get("pass"):
+            p["pass"] = "x"
+
+    print(f"  [HTTP] Updating {len(pools)} pool(s) on {ip} -> user={new_worker}")
+    ok, status, body = antminer_set_conf(ip, conf, auth_name=auth_name or "Digest")
+    if ok:
+        return True, "Web UI accepted new config (HTTP 200)"
+    return False, f"Web UI rejected config (HTTP {status}): {body}"
+
+
+def change_worker_via_cgminer(ip, new_worker, pool_url=""):
+    """Fallback: live-switch pools via CGMiner API. NOT persistent across reboot."""
+    pools_data = send_cgminer_command(ip, "pools")
+    if not pools_data or "POOLS" not in pools_data:
+        return False, "CGMiner API not reachable on port 4028"
+
+    pools = pools_data["POOLS"]
+    if not pools:
+        return False, "No pools returned by CGMiner"
+
+    # Pick URL: explicit pool_url > active pool URL > first pool URL
+    target_url = pool_url
+    if not target_url:
+        for p in pools:
+            if p.get("Stratum Active") or p.get("Status") == "Alive":
+                target_url = p.get("URL", "")
+                break
+    if not target_url and pools:
+        target_url = pools[0].get("URL", "")
+    if not target_url:
+        return False, "Could not determine pool URL"
+
+    # Add the new pool. Note CORRECT protocol: parameter as separate field.
+    add_resp = send_cgminer_command(ip, "addpool", parameter=f"{target_url},{new_worker},x")
+    if not add_resp:
+        return False, "addpool returned no response (write-API likely disabled in miner config)"
+
+    # Check status code
+    status = (add_resp.get("STATUS") or [{}])[0]
+    if status.get("STATUS") not in ("S", "I"):
+        return False, f"addpool rejected: {status.get('Msg', 'unknown')}"
+
+    # New pool index = previous count
+    new_idx = len(pools)
+    sw_resp = send_cgminer_command(ip, "switchpool", parameter=str(new_idx))
+    if not sw_resp:
+        return False, "switchpool returned no response"
+
+    sw_status = (sw_resp.get("STATUS") or [{}])[0]
+    if sw_status.get("STATUS") not in ("S", "I"):
+        return False, f"switchpool rejected: {sw_status.get('Msg', 'unknown')}"
+
+    # Best-effort: disable old pools so miner doesn't fall back
+    for i in range(new_idx):
+        send_cgminer_command(ip, "disablepool", parameter=str(i))
+
+    return True, f"CGMiner switched to pool {new_idx} (worker={new_worker}) — NOT PERSISTENT, redo via web UI for permanence"
+
+
 def execute_command(cmd):
     """Execute a command on a machine"""
     ip = cmd.get("ip", "")
     action = cmd.get("action", "")
     result = "OK"
-    
+
     try:
         if action == "reboot":
             # Try Digest auth first (newer Bitmain firmware)
@@ -251,48 +398,38 @@ def execute_command(cmd):
                 response = send_cgminer_command(ip, "restart")
                 result = "CGMiner restart sent" if response else f"Failed: {str(e)}"
             print(f"  -> {result}")
-            
+
         elif action == "change_worker":
-            new_worker = cmd.get("params", {}).get("worker_name", "")
-            pool_url = cmd.get("params", {}).get("pool_url", "")
-            try:
-                # Get current pools to find which one to modify
-                pools_data = send_cgminer_command(ip, "pools")
-                if pools_data and "POOLS" in pools_data:
-                    # Find active pool
-                    for pool in pools_data["POOLS"]:
-                        if pool.get("Stratum Active") or pool.get("Status") == "Alive":
-                            pool_id = pool.get("POOL", 0)
-                            current_url = pool.get("URL", "")
-                            # Remove old pool and add new one with new worker
-                            if pool_url:
-                                send_cgminer_command(ip, f"addpool|{pool_url},{new_worker},x")
-                            else:
-                                send_cgminer_command(ip, f"addpool|{current_url},{new_worker},x")
-                            # Switch to the new pool
-                            send_cgminer_command(ip, f"switchpool|{len(pools_data['POOLS'])}")
-                            result = f"Worker changed to {new_worker} on {ip}"
-                            break
-                    else:
-                        result = f"No active pool found on {ip}"
+            params = cmd.get("params", {}) or {}
+            new_worker = params.get("worker_name", "").strip()
+            pool_url = params.get("pool_url", "").strip()
+
+            if not new_worker:
+                result = "Failed: worker_name is empty"
+                print(f"  -> {result}")
+            else:
+                print(f"  [WORKER] {ip} -> {new_worker}" + (f" @ {pool_url}" if pool_url else ""))
+
+                # Primary: HTTP web UI (persistent across reboots)
+                ok, msg = change_worker_via_http(ip, new_worker, pool_url)
+                if ok:
+                    result = f"OK (web UI): {msg}"
                 else:
-                    # Try direct approach - some firmwares support this
-                    from requests.auth import HTTPDigestAuth
-                    r = requests.post(f"http://{ip}/cgi-bin/set_miner_conf.cgi",
-                                    auth=HTTPDigestAuth(MINER_USER, MINER_PASS),
-                                    json={"pools": [{"url": pool_url or "stratum+tcp://ltc.viabtc.com:3002", "user": new_worker, "pass": "x"}]},
-                                    timeout=10)
-                    result = f"Config update sent to {ip} (status {r.status_code})"
-            except Exception as e:
-                result = f"Failed to change worker: {str(e)}"
-            print(f"  -> {result}")
-            
+                    print(f"  [HTTP fallback reason] {msg}")
+                    # Fallback: CGMiner live switch (not persistent)
+                    ok2, msg2 = change_worker_via_cgminer(ip, new_worker, pool_url)
+                    if ok2:
+                        result = f"OK (CGMiner): {msg2}"
+                    else:
+                        result = f"FAILED. HTTP: {msg} | CGMiner: {msg2}"
+                print(f"  -> {result}")
+
         elif action == "change_pool":
             new_pool = cmd.get("params", {}).get("pool_url", "")
-            send_cgminer_command(ip, f"addpool|{new_pool}")
-            result = f"Pool change to {new_pool} - addpool command sent"
+            resp = send_cgminer_command(ip, "addpool", parameter=f"{new_pool},x,x")
+            result = f"Pool change to {new_pool} — addpool {'sent' if resp else 'failed'}"
             print(f"  -> {result}")
-            
+
     except Exception as e:
         result = f"Error: {str(e)}"
         print(f"  -> ERROR: {e}")

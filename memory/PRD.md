@@ -31,7 +31,15 @@ Full-stack application to manage a crypto mining farm. Core requirements include
 - Farm stats display
 - CoinGecko crypto price integration
 
+## Recent Changes (Feb 2026)
+- **wkbeast_sync.py - Change Worker fix**: Rewrote `change_worker` execution.
+  - Primary path: HTTP web UI (`get_miner_conf.cgi` → mutate pools[*].user → `set_miner_conf.cgi`) — persistent across reboots.
+  - Fallback: CGMiner API with corrected protocol (`{"command":"addpool","parameter":"url,user,pass"}` instead of broken `command|args` format), plus `disablepool` cleanup of old pools and proper status checks.
+  - Both Digest + Basic auth attempted; JSON + form-encoded POST fallback for legacy Antminer firmware.
+  - Detailed result strings reported back to dashboard so failures are diagnosable.
+
 ## Pending Items
+- L1 Farm (Fluminer) scan slowness — add `bypass_cgminer` config flag for HTTP-only farms (P1)
 - Add watcher keys for ALL sub-accounts (currently only hamidwk has one)
 - Live earnings calculator (fiat value of mined coins)
 - In-app notifications when machine goes offline
