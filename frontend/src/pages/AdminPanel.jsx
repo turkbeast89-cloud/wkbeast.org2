@@ -4,7 +4,7 @@ import { API } from "../App";
 import { toast } from "sonner";
 import { 
   Users, Server, Key, Wrench, Plus, Trash2, Edit2, 
-  RefreshCw, Save, Eye, EyeOff, Activity
+  RefreshCw, Save, Eye, EyeOff, Activity, MessageSquare
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -57,6 +57,13 @@ const AdminPanel = () => {
   const [statusForm, setStatusForm] = useState({ customer_id: "", worker_name: "", status: "online", hashrate: "", temperature: "", uptime: "" });
   const [mainWatcherUrl, setMainWatcherUrl] = useState("");
   const [savingWatcher, setSavingWatcher] = useState(false);
+  const [botSettings, setBotSettings] = useState({
+    auto_reminders_enabled: false,
+    offline_alerts_enabled: false,
+    admin_phone: "+905464678877",
+    reminder_day: 1,
+    reminder_interval_days: 3
+  });
 
   useEffect(() => {
     fetchData();
@@ -64,12 +71,13 @@ const AdminPanel = () => {
 
   const fetchData = async () => {
     try {
-      const [accountsRes, customersRes, statsRes, logsRes, viaBtcRes] = await Promise.all([
+      const [accountsRes, customersRes, statsRes, logsRes, viaBtcRes, botRes] = await Promise.all([
         axios.get(`${API}/customer-accounts`),
         axios.get(`${API}/customers`),
         axios.get(`${API}/farm-stats`),
         axios.get(`${API}/maintenance-logs`),
-        axios.get(`${API}/viabtc-settings`)
+        axios.get(`${API}/viabtc-settings`),
+        axios.get(`${API}/bot-settings`)
       ]);
       setAccounts(accountsRes.data);
       setCustomers(customersRes.data);
@@ -84,6 +92,7 @@ const AdminPanel = () => {
       if (viaBtcRes.data.watcher_key) {
         setMainWatcherUrl(`https://www.viabtc.com/en/observer/worker?access_key=${viaBtcRes.data.watcher_key}&coin=LTC`);
       }
+      setBotSettings(botRes.data);
     } catch (e) {
       console.error(e);
     } finally {
@@ -602,6 +611,145 @@ const AdminPanel = () => {
           </Button>
         </div>
         <p className="text-sm text-gray-500">Manually update hashrate, temperature, and status for customer machines</p>
+      </div>
+
+      {/* WhatsApp Bot Automation */}
+      <div className="card p-6" data-testid="whatsapp-bot-settings">
+        <div className="flex items-center gap-2 mb-4">
+          <MessageSquare className="text-[#25D366]" size={20} />
+          <h2 className="text-lg font-bold text-white">WhatsApp Bot Automation</h2>
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Auto Payment Reminders */}
+          <div className="p-4 bg-[#0A0A0A] rounded-lg border border-[#27272A]">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h3 className="text-sm font-bold text-white">Auto Payment Reminders</h3>
+                <p className="text-xs text-gray-500 mt-1">Sends on 1st of month + every {botSettings.reminder_interval_days} days if unpaid</p>
+              </div>
+              <button
+                onClick={async () => {
+                  const newVal = !botSettings.auto_reminders_enabled;
+                  try {
+                    await axios.put(`${API}/bot-settings`, { auto_reminders_enabled: newVal });
+                    setBotSettings({ ...botSettings, auto_reminders_enabled: newVal });
+                    toast.success(newVal ? "Auto reminders ON" : "Auto reminders OFF");
+                  } catch (e) { toast.error("Failed to update"); }
+                }}
+                className={`relative w-12 h-6 rounded-full transition-colors ${botSettings.auto_reminders_enabled ? 'bg-[#25D366]' : 'bg-[#27272A]'}`}
+                data-testid="toggle-auto-reminders"
+              >
+                <span className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${botSettings.auto_reminders_enabled ? 'left-7' : 'left-1'}`} />
+              </button>
+            </div>
+            <div className="text-xs text-gray-500">
+              {botSettings.last_reminder_sent ? `Last sent: ${new Date(botSettings.last_reminder_sent).toLocaleDateString()}` : "Never sent yet"}
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="mt-3 border-[#27272A] text-xs"
+              onClick={async () => {
+                toast.info("Sending reminders...");
+                try {
+                  const res = await axios.post(`${API}/bot/run-reminder-check`);
+                  if (res.data.success) toast.success(`Sent ${res.data.sent} reminders!`);
+                  else toast.error(res.data.message || res.data.error);
+                } catch (e) { toast.error("Failed"); }
+              }}
+              data-testid="manual-send-reminders"
+            >
+              Send Now
+            </Button>
+          </div>
+          
+          {/* Offline Machine Alerts */}
+          <div className="p-4 bg-[#0A0A0A] rounded-lg border border-[#27272A]">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h3 className="text-sm font-bold text-white">Offline Machine Alerts</h3>
+                <p className="text-xs text-gray-500 mt-1">WhatsApp alert when machine goes offline/online</p>
+              </div>
+              <button
+                onClick={async () => {
+                  const newVal = !botSettings.offline_alerts_enabled;
+                  try {
+                    await axios.put(`${API}/bot-settings`, { offline_alerts_enabled: newVal });
+                    setBotSettings({ ...botSettings, offline_alerts_enabled: newVal });
+                    toast.success(newVal ? "Offline alerts ON" : "Offline alerts OFF");
+                  } catch (e) { toast.error("Failed to update"); }
+                }}
+                className={`relative w-12 h-6 rounded-full transition-colors ${botSettings.offline_alerts_enabled ? 'bg-[#25D366]' : 'bg-[#27272A]'}`}
+                data-testid="toggle-offline-alerts"
+              >
+                <span className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${botSettings.offline_alerts_enabled ? 'left-7' : 'left-1'}`} />
+              </button>
+            </div>
+            <div className="text-xs text-gray-500">
+              {botSettings.last_offline_check ? `Last check: ${new Date(botSettings.last_offline_check).toLocaleTimeString()}` : "Never checked"}
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="mt-3 border-[#27272A] text-xs"
+              onClick={async () => {
+                toast.info("Checking machines...");
+                try {
+                  const res = await axios.post(`${API}/bot/run-offline-check`);
+                  if (res.data.success) {
+                    if (res.data.newly_offline > 0) toast.warning(`${res.data.newly_offline} machine(s) newly offline! Alert sent.`);
+                    else if (res.data.back_online > 0) toast.success(`${res.data.back_online} machine(s) back online!`);
+                    else toast.success(`All good! ${res.data.current_offline} offline total.`);
+                  } else toast.error(res.data.message || res.data.error);
+                } catch (e) { toast.error("Failed"); }
+              }}
+              data-testid="manual-check-offline"
+            >
+              Check Now
+            </Button>
+          </div>
+        </div>
+        
+        {/* Admin Phone */}
+        <div className="mt-4 flex items-center gap-3">
+          <Label className="text-xs text-gray-400 whitespace-nowrap">Admin Phone:</Label>
+          <Input
+            value={botSettings.admin_phone || ""}
+            onChange={(e) => setBotSettings({ ...botSettings, admin_phone: e.target.value })}
+            className="bg-[#0A0A0A] border-[#27272A] text-sm max-w-[200px]"
+            placeholder="+905464678877"
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            className="border-[#27272A] text-xs"
+            onClick={async () => {
+              try {
+                await axios.put(`${API}/bot-settings`, { admin_phone: botSettings.admin_phone });
+                toast.success("Admin phone updated");
+              } catch (e) { toast.error("Failed"); }
+            }}
+          >
+            Save
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="border-[#27272A] text-xs text-[#25D366]"
+            onClick={async () => {
+              toast.info("Sending test message...");
+              try {
+                const res = await axios.post(`${API}/whatsapp/test-send?to=${encodeURIComponent(botSettings.admin_phone)}`);
+                if (res.data.success) toast.success("Test message sent! Check WhatsApp.");
+                else toast.error(res.data.error);
+              } catch (e) { toast.error("Failed to send test"); }
+            }}
+            data-testid="test-whatsapp-btn"
+          >
+            Test WhatsApp
+          </Button>
+        </div>
       </div>
 
       {/* Maintenance Logs */}

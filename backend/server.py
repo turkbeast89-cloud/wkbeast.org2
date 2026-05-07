@@ -3062,7 +3062,299 @@ async def notify_offline_machines(admin_phone: str = "+905464678877"):
     except Exception as e:
         return {"success": False, "error": str(e), "offline": len(offline_machines), "machines": offline_machines}
 
+# ==================== BOT SETTINGS & AUTO-SCHEDULER ====================
 
+@api_router.get("/bot-settings")
+async def get_bot_settings():
+    """Get WhatsApp bot automation settings"""
+    settings = await db.bot_settings.find_one({"id": "bot_settings"}, {"_id": 0})
+    if not settings:
+        settings = {
+            "id": "bot_settings",
+            "auto_reminders_enabled": False,
+            "offline_alerts_enabled": False,
+            "admin_phone": "+905464678877",
+            "reminder_day": 1,
+            "reminder_interval_days": 3,
+            "last_reminder_sent": None,
+            "last_offline_check": None,
+            "known_offline_workers": []
+        }
+        await db.bot_settings.insert_one(settings)
+    settings.pop("_id", None)
+    return settings
+
+@api_router.put("/bot-settings")
+async def update_bot_settings(data: dict):
+    """Update WhatsApp bot automation settings"""
+    allowed_keys = ["auto_reminders_enabled", "offline_alerts_enabled", "admin_phone", "reminder_day", "reminder_interval_days"]
+    update_data = {k: v for k, v in data.items() if k in allowed_keys}
+    
+    result = await db.bot_settings.find_one_and_update(
+        {"id": "bot_settings"},
+        {"$set": update_data},
+        upsert=True,
+        return_document=True,
+        projection={"_id": 0}
+    )
+    return result
+
+@api_router.post("/bot/run-reminder-check")
+async def run_reminder_check():
+    """Manually trigger a payment reminder check (also runs automatically)"""
+    bot_settings = await db.bot_settings.find_one({"id": "bot_settings"}, {"_id": 0})
+    if not bot_settings or not bot_settings.get("auto_reminders_enabled"):
+        return {"success": False, "message": "Auto reminders are disabled"}
+    
+    return await _send_auto_reminders()
+
+@api_router.post("/bot/run-offline-check")
+async def run_offline_check():
+    """Manually trigger an offline machine check (also runs automatically)"""
+    bot_settings = await db.bot_settings.find_one({"id": "bot_settings"}, {"_id": 0})
+    if not bot_settings or not bot_settings.get("offline_alerts_enabled"):
+        return {"success": False, "message": "Offline alerts are disabled"}
+    
+    return await _check_offline_and_alert()
+
+async def _send_auto_reminders():
+    """Internal: Send payment reminders for current month"""
+    from datetime import datetime, timezone
+    
+    client_tw = get_twilio_client()
+    if not client_tw:
+        return {"success": False, "error": "Twilio not configured"}
+    
+    now = datetime.now(timezone.utc)
+    current_month = now.strftime("%Y-%m")
+    
+    settings = await db.settings.find_one({"id": "settings"}, {"_id": 0})
+    if not settings:
+        return {"success": False, "error": "App settings not configured"}
+    
+    payments = await db.payments.find({"month": current_month, "status": "unpaid"}, {"_id": 0}).to_list(10000)
+    customers = await db.customers.find({}, {"_id": 0}).to_list(10000)
+    customer_map = {c["id"]: c for c in customers}
+    
+    sent = 0
+    failed = 0
+    
+    for payment in payments:
+        customer = customer_map.get(payment.get("customer_id"))
+        if not customer or customer.get("status") == "paused":
+            continue
+        
+        phone = customer.get("phone", "")
+        if not phone:
+            continue
+        
+        phone_clean = phone.replace(" ", "").replace("-", "")
+        if not phone_clean.startswith("+"):
+            if phone_clean.startswith("961"):
+                phone_clean = "+" + phone_clean
+            elif phone_clean.startswith("0"):
+                phone_clean = "+961" + phone_clean[1:]
+            else:
+                phone_clean = "+961" + phone_clean
+        
+        message = settings.get("message_template", "Payment reminder: ${amount} for {month}").format(
+            month=current_month,
+            amount=payment.get("amount", 0),
+            whish=settings.get("whish_number", ""),
+            usdt=settings.get("usdt_address", ""),
+            team=settings.get("team_name", "WKBeast")
+        )
+        
+        try:
+            client_tw.messages.create(
+                body=message,
+                from_=get_whatsapp_from(),
+                to=f"whatsapp:{phone_clean}"
+            )
+            sent += 1
+        except:
+            failed += 1
+    
+    # Update last sent timestamp
+    await db.bot_settings.update_one(
+        {"id": "bot_settings"},
+        {"$set": {"last_reminder_sent": now.isoformat()}}
+    )
+    
+    return {"success": True, "sent": sent, "failed": failed, "month": current_month}
+
+async def _check_offline_and_alert():
+    """Internal: Check for offline machines and alert admin"""
+    import aiohttp
+    from datetime import datetime, timezone
+    
+    client_tw = get_twilio_client()
+    if not client_tw:
+        return {"success": False, "error": "Twilio not configured"}
+    
+    bot_settings = await db.bot_settings.find_one({"id": "bot_settings"}, {"_id": 0})
+    admin_phone = bot_settings.get("admin_phone", "+905464678877") if bot_settings else "+905464678877"
+    known_offline = set(bot_settings.get("known_offline_workers", [])) if bot_settings else set()
+    
+    # Fetch current machine status using watcher keys
+    customer_accounts = await db.customer_accounts.find({}, {"_id": 0}).to_list(1000)
+    customers = await db.customers.find({}, {"_id": 0}).to_list(1000)
+    customer_map = {c["id"]: c for c in customers}
+    
+    current_offline = set()
+    offline_details = []
+    
+    async with aiohttp.ClientSession() as session:
+        for acc in customer_accounts:
+            watcher_key = acc.get("watcher_key")
+            if not watcher_key:
+                continue
+            customer = customer_map.get(acc.get("customer_id"), {})
+            if customer.get("status") == "paused":
+                continue
+            
+            try:
+                url = f"https://www.viabtc.com/res/observer/worker?access_key={watcher_key}&coin=LTC"
+                async with session.get(url, timeout=10) as resp:
+                    data = await resp.json()
+                    if data.get("code") == 0:
+                        for w in data.get("data", {}).get("data", []):
+                            wname = w.get("worker_name", w.get("name", ""))
+                            status = w.get("worker_status", w.get("status", ""))
+                            worker_id = f"{acc.get('worker_name', '')}:{wname}"
+                            
+                            if status in ["offline", "unactive"]:
+                                current_offline.add(worker_id)
+                                last_active = w.get("last_active", 0)
+                                import time as t
+                                offline_mins = int((t.time() - last_active) / 60) if last_active else 0
+                                offline_details.append({
+                                    "worker_id": worker_id,
+                                    "name": wname,
+                                    "account": customer.get("name", acc.get("worker_name", "")),
+                                    "minutes_offline": offline_mins
+                                })
+            except:
+                pass
+    
+    # Determine newly offline and newly back online
+    newly_offline = current_offline - known_offline
+    back_online = known_offline - current_offline
+    
+    messages_sent = []
+    
+    # Alert for newly offline machines
+    if newly_offline:
+        alert = f"⚠️ ALERT: {len(newly_offline)} machine(s) went OFFLINE\n\n"
+        for worker_id in newly_offline:
+            detail = next((d for d in offline_details if d["worker_id"] == worker_id), None)
+            if detail:
+                alert += f"❌ {detail['name']} ({detail['account']})\n"
+            else:
+                alert += f"❌ {worker_id}\n"
+        
+        try:
+            phone = admin_phone if admin_phone.startswith("+") else "+" + admin_phone
+            client_tw.messages.create(body=alert, from_=get_whatsapp_from(), to=f"whatsapp:{phone}")
+            messages_sent.append("offline_alert")
+        except:
+            pass
+    
+    # Alert for machines back online
+    if back_online:
+        recovery = f"✅ RECOVERED: {len(back_online)} machine(s) back ONLINE\n\n"
+        for worker_id in back_online:
+            recovery += f"✅ {worker_id}\n"
+        
+        try:
+            phone = admin_phone if admin_phone.startswith("+") else "+" + admin_phone
+            client_tw.messages.create(body=recovery, from_=get_whatsapp_from(), to=f"whatsapp:{phone}")
+            messages_sent.append("recovery_alert")
+        except:
+            pass
+    
+    # Update known offline list
+    await db.bot_settings.update_one(
+        {"id": "bot_settings"},
+        {"$set": {
+            "known_offline_workers": list(current_offline),
+            "last_offline_check": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    
+    return {
+        "success": True,
+        "current_offline": len(current_offline),
+        "newly_offline": len(newly_offline),
+        "back_online": len(back_online),
+        "messages_sent": messages_sent
+    }
+
+# ==================== BACKGROUND SCHEDULER ====================
+
+_scheduler_running = False
+
+async def bot_scheduler():
+    """Background task that runs payment reminders and offline checks"""
+    global _scheduler_running
+    _scheduler_running = True
+    
+    while _scheduler_running:
+        try:
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc)
+            
+            bot_settings = await db.bot_settings.find_one({"id": "bot_settings"}, {"_id": 0})
+            if not bot_settings:
+                await asyncio.sleep(60)
+                continue
+            
+            # --- PAYMENT REMINDERS ---
+            if bot_settings.get("auto_reminders_enabled"):
+                reminder_day = bot_settings.get("reminder_day", 1)
+                interval = bot_settings.get("reminder_interval_days", 3)
+                last_sent = bot_settings.get("last_reminder_sent")
+                
+                should_send = False
+                if now.day == reminder_day:
+                    # First of month — always send
+                    if not last_sent or last_sent[:7] != now.strftime("%Y-%m"):
+                        should_send = True
+                elif now.day > reminder_day:
+                    # After first day — check interval
+                    if last_sent:
+                        last_dt = datetime.fromisoformat(last_sent.replace("Z", "+00:00")) if isinstance(last_sent, str) else last_sent
+                        days_since = (now - last_dt).days
+                        if days_since >= interval:
+                            should_send = True
+                    else:
+                        should_send = True
+                
+                if should_send:
+                    await _send_auto_reminders()
+            
+            # --- OFFLINE ALERTS (check every 10 minutes) ---
+            if bot_settings.get("offline_alerts_enabled"):
+                last_check = bot_settings.get("last_offline_check")
+                should_check = True
+                if last_check:
+                    last_dt = datetime.fromisoformat(last_check.replace("Z", "+00:00")) if isinstance(last_check, str) else last_check
+                    mins_since = (now - last_dt).total_seconds() / 60
+                    if mins_since < 10:
+                        should_check = False
+                
+                if should_check:
+                    await _check_offline_and_alert()
+            
+        except Exception as e:
+            logging.error(f"Bot scheduler error: {e}")
+        
+        # Sleep 60 seconds between checks
+        await asyncio.sleep(60)
+
+@app.on_event("startup")
+async def start_scheduler():
+    asyncio.create_task(bot_scheduler())
 
 # Include the router
 app.include_router(api_router)
