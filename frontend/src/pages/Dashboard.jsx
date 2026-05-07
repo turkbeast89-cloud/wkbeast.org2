@@ -22,6 +22,7 @@ const Dashboard = () => {
   const [showOnline, setShowOnline] = useState(false);  // Toggle for online machines
   const [expandedAccount, setExpandedAccount] = useState(null);  // Track which account is expanded
   const [monitorMode, setMonitorMode] = useState("watcher");  // "api" or "watcher" - default watcher (bypasses Cloudflare)
+  const [overdueData, setOverdueData] = useState(null);
 
   // Helper to format hashrate
   const formatHashrate = (hashrate, coin) => {
@@ -44,11 +45,19 @@ const Dashboard = () => {
   useEffect(() => {
     fetchStats();
     fetchMachineMonitor();
+    fetchOverdue();
     
     // Auto-refresh machine monitor every 60 seconds
     const interval = setInterval(fetchMachineMonitor, 60000);
     return () => clearInterval(interval);
   }, [monitorMode]);
+
+  const fetchOverdue = async () => {
+    try {
+      const res = await axios.get(`${API}/payments/overdue`);
+      setOverdueData(res.data);
+    } catch (e) {}
+  };
 
   const fetchStats = async () => {
     try {
@@ -201,6 +210,47 @@ const Dashboard = () => {
           color="secondary"
         />
       </div>
+
+      {/* Overdue Payments */}
+      {overdueData && overdueData.total_customers > 0 && (
+        <div className="bg-gradient-to-r from-red-500/5 to-[#0F0F0F] rounded-xl border border-red-500/30 p-6" data-testid="overdue-section">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-red-500/10">
+                <AlertTriangle className="text-red-500" size={20} />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-white">Overdue Payments</h2>
+                <p className="text-sm text-gray-500">{overdueData.total_customers} customer(s) with past-due balance</p>
+              </div>
+            </div>
+            <div className="text-right">
+              <p className="text-2xl font-bold text-red-400">${overdueData.total_overdue.toLocaleString()}</p>
+              <p className="text-xs text-gray-500">total overdue</p>
+            </div>
+          </div>
+          <div className="space-y-2 max-h-[300px] overflow-y-auto">
+            {overdueData.overdue_customers.map((cust, idx) => (
+              <div key={idx} className="bg-[#0A0A0A] rounded-lg border border-[#27272A] p-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-sm font-medium text-white">{cust.customer_name}</span>
+                    {cust.status === 'paused' && <span className="text-xs text-yellow-500 ml-2">(paused)</span>}
+                  </div>
+                  <span className="text-lg font-bold text-red-400">${cust.total_owed.toLocaleString()}</span>
+                </div>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {cust.months.map((m, mi) => (
+                    <span key={mi} className="text-xs bg-red-500/10 text-red-400 px-2 py-1 rounded">
+                      {m.month}: ${m.amount.toLocaleString()}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Real-Time Machine Monitor */}
       <div className="bg-gradient-to-r from-[#0F0F0F] to-[#1A1A1A] rounded-xl border border-[#27272A] p-6">

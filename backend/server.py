@@ -440,6 +440,53 @@ async def bulk_update_payment_status(payment_ids: List[str], status: str):
     )
     return {"modified": result.modified_count}
 
+
+@api_router.get("/payments/overdue")
+async def get_overdue_payments():
+    """Get all unpaid payments from previous months grouped by customer"""
+    current_month = datetime.now(timezone.utc).strftime("%Y-%m")
+    
+    # Find all unpaid payments (current month and older)
+    unpaid = await db.payments.find({"status": "unpaid"}, {"_id": 0}).to_list(10000)
+    customers = await db.customers.find({}, {"_id": 0}).to_list(10000)
+    customer_map = {c["id"]: c for c in customers}
+    
+    overdue = []
+    for p in unpaid:
+        if p.get("month", "") < current_month:
+            customer = customer_map.get(p.get("customer_id"), {})
+            overdue.append({
+                "payment_id": p.get("id", ""),
+                "customer_id": p.get("customer_id", ""),
+                "customer_name": p.get("customer_name", customer.get("name", "Unknown")),
+                "phone": customer.get("phone", ""),
+                "amount": p.get("amount", 0),
+                "month": p.get("month", ""),
+                "status": customer.get("status", "active")
+            })
+    
+    # Group by customer
+    by_customer = {}
+    for o in overdue:
+        cname = o["customer_name"]
+        if cname not in by_customer:
+            by_customer[cname] = {
+                "customer_name": cname,
+                "customer_id": o["customer_id"],
+                "phone": o["phone"],
+                "status": o["status"],
+                "total_owed": 0,
+                "months": []
+            }
+        by_customer[cname]["total_owed"] += o["amount"]
+        by_customer[cname]["months"].append({"month": o["month"], "amount": o["amount"], "payment_id": o["payment_id"]})
+    
+    # Sort by total owed descending
+    result = sorted(by_customer.values(), key=lambda x: x["total_owed"], reverse=True)
+    
+    return {"overdue_customers": result, "total_overdue": sum(c["total_owed"] for c in result), "total_customers": len(result)}
+
+
 # ==================== STATISTICS ====================
 
 @api_router.get("/stats")

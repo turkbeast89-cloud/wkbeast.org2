@@ -244,6 +244,10 @@ const CustomerDashboard = ({ session, onLogout }) => {
   const hasPendingPayment = currentMonthPayment?.status === "unpaid" && currentMonthPayment?.amount > 0;
   const isPaid = currentMonthPayment?.status === "paid";
   
+  // Calculate total overdue from previous months
+  const overduePayments = payments?.filter(p => p.status === "unpaid" && p.month < currentMonth && p.amount > 0) || [];
+  const totalOverdue = overduePayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+  
   // Get payment deadline based on payment status
   const paymentDeadline = getPaymentDeadline(hasPendingPayment && !isPaid);
 
@@ -413,6 +417,29 @@ const CustomerDashboard = ({ session, onLogout }) => {
                   </svg>
                   Request Reactivation
                 </a>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Overdue Balance from Previous Months */}
+        {totalOverdue > 0 && customer?.status !== 'paused' && (
+          <div className="bg-gradient-to-r from-red-900/30 to-red-800/10 rounded-xl border border-red-500/40 p-5" data-testid="overdue-balance">
+            <div className="flex items-start gap-4">
+              <div className="p-3 rounded-full bg-red-500/20">
+                <AlertTriangle className="text-red-500" size={24} />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-lg font-bold text-red-400">Outstanding Balance: ${totalOverdue.toLocaleString()}</h3>
+                <p className="text-sm text-gray-400 mt-1">You have unpaid fees from previous months:</p>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {overduePayments.map((p, i) => (
+                    <span key={i} className="text-xs bg-red-500/10 text-red-400 px-2 py-1 rounded border border-red-500/20">
+                      {p.month}: ${p.amount?.toLocaleString()}
+                    </span>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-500 mt-2">Please settle your outstanding balance to avoid service interruption.</p>
               </div>
             </div>
           </div>
