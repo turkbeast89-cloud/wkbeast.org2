@@ -819,8 +819,9 @@ const Dashboard = () => {
                                   const name = m.worker_name || m.ip;
                                   if (!window.confirm(`Add "${name}" as a temporary customer?`)) return;
                                   try {
-                                    await axios.post(`${API}/customers`, { name: name, phone: "", machines: [], total_cost: 0, total_fee: 0, status: "active", notes: "Whitelisted from Live Panel" });
-                                    await axios.post(`${API}/customer-accounts`, { customer_name: name, username: name.toLowerCase(), password: "0000", worker_name: m.worker_name || "" });
+                                    const custRes = await axios.post(`${API}/customers`, { name: name, phone: "", machines: [], total_cost: 0, total_fee: 0, status: "active", notes: "Whitelisted from Live Panel" });
+                                    const custId = custRes.data.id;
+                                    await axios.post(`${API}/customer-accounts`, { customer_id: custId, username: name.toLowerCase().replace(/[^a-z0-9]/g, ''), password: "0000", worker_name: m.worker_name || "" });
                                     toast.success(`${name} added as customer!`);
                                     fetchLiveMachines();
                                   } catch (e) { toast.error("Failed to add"); }
