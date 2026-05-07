@@ -548,9 +548,6 @@ async def get_live_machine_data(filter_customers: bool = True):
     """Get live machine data. filter_customers=true shows only customer machines, false shows all."""
     machines = await db.machine_live_data.find({}, {"_id": 0}).to_list(10000)
     
-    if not filter_customers:
-        return machines
-    
     # Get all customer worker names
     accounts = await db.customer_accounts.find({}, {"_id": 0, "worker_name": 1}).to_list(10000)
     customer_workers = set()
@@ -559,18 +556,21 @@ async def get_live_machine_data(filter_customers: bool = True):
         if wn:
             customer_workers.add(wn)
     
-    # Filter: only show machines whose worker_name contains a customer worker name
-    filtered = []
+    # Mark each machine as customer or not
     for m in machines:
         worker = m.get("worker_name", "").lower().strip()
-        if not worker:
-            continue
-        for cw in customer_workers:
-            if cw in worker or worker in cw:
-                filtered.append(m)
-                break
+        is_customer = False
+        if worker:
+            for cw in customer_workers:
+                if cw in worker or worker in cw:
+                    is_customer = True
+                    break
+        m["is_customer"] = is_customer
     
-    return filtered
+    if filter_customers:
+        return [m for m in machines if m["is_customer"]]
+    
+    return machines
 
 @api_router.get("/machine-data/commands")
 async def get_pending_commands(api_key: str = "", farm: str = ""):

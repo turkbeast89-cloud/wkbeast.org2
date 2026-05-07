@@ -788,7 +788,9 @@ const Dashboard = () => {
                     const isOnline = m.status === 'online';
                     const isHot = m.temperature > 80;
                     return (
-                      <tr key={m.ip || idx} className="border-b border-[#27272A]/50 hover:bg-[#1A1A1A] transition-colors">
+                      <tr key={m.ip || idx} className={`border-b border-[#27272A]/50 hover:bg-[#1A1A1A] transition-colors ${
+                        m.is_customer ? 'bg-[#00E054]/5' : ''
+                      }`}>
                         <td className="py-2 px-3">
                           <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${
                             isOnline ? 'bg-[#00E054]/10 text-[#00E054]' : 
@@ -813,6 +815,7 @@ const Dashboard = () => {
                             }}
                             title="Click to rename"
                           >{m.worker_name || '—'}</span>
+                          {m.is_customer && <span className="ml-1 text-[10px] bg-[#00E054]/20 text-[#00E054] px-1 rounded">customer</span>}
                         </td>
                         <td className="py-2 px-3 text-gray-400 text-xs">{m.model || '—'}</td>
                         <td className="py-2 px-3 text-purple-400 text-xs">{m.farm || '—'}</td>
@@ -826,7 +829,7 @@ const Dashboard = () => {
                         <td className="py-2 px-3 text-gray-500 text-xs">{m.uptime || '—'}</td>
                         <td className="py-2 px-3 text-right">
                           <div className="flex items-center gap-1 justify-end">
-                            {liveFilter === "all" && (
+                            {liveFilter === "all" && !m.is_customer && (
                               <>
                               <button
                                 onClick={async () => {
@@ -855,11 +858,35 @@ const Dashboard = () => {
                                   } catch (e) { toast.error("Failed"); }
                                 }}
                                 className="text-xs bg-gray-500/10 text-gray-400 hover:bg-red-500/20 hover:text-red-400 px-2 py-1 rounded transition-colors"
-                                data-testid={`delete-machine-${m.ip}`}
                               >
                                 Remove
                               </button>
                               </>
+                            )}
+                            {liveFilter === "all" && m.is_customer && (
+                              <button
+                                onClick={async () => {
+                                  const name = m.worker_name || m.ip;
+                                  if (!window.confirm(`Remove "${name}" from customers and machine list?`)) return;
+                                  try {
+                                    // Delete customer account and customer by worker name
+                                    const accs = await axios.get(`${API}/customer-accounts`);
+                                    const acc = accs.data.find(a => a.worker_name?.toLowerCase() === (m.worker_name || '').toLowerCase());
+                                    if (acc) {
+                                      await axios.delete(`${API}/customer-accounts/${acc.id}`);
+                                      if (acc.customer_id) {
+                                        try { await axios.delete(`${API}/customers/${acc.customer_id}`); } catch(e) {}
+                                      }
+                                    }
+                                    await axios.delete(`${API}/machine-data/${encodeURIComponent(m.ip)}`);
+                                    toast.success(`${name} removed`);
+                                    fetchLiveMachines();
+                                  } catch (e) { toast.error("Failed"); }
+                                }}
+                                className="text-xs bg-red-500/10 text-red-400 hover:bg-red-500/20 px-2 py-1 rounded transition-colors"
+                              >
+                                Un-whitelist
+                              </button>
                             )}
                             <button
                               onClick={async () => {

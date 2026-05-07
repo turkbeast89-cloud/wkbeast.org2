@@ -294,3 +294,4 @@ credentials.json
 *.key
 .credentials
 frontend/node_modules/.cache/default-development/16.pack
+frontend/node_modules/.cache/default-development/18.pack
