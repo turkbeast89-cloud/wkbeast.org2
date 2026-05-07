@@ -3198,7 +3198,7 @@ async def run_offline_check():
     return await _check_offline_and_alert(force_send=True)
 
 async def _send_auto_reminders():
-    """Internal: Send payment reminders with escalating urgency based on day of month"""
+    """Internal: Auto-generate payments if needed, then send WhatsApp reminders"""
     from datetime import datetime, timezone
     
     client_tw = get_twilio_client()
@@ -3207,15 +3207,37 @@ async def _send_auto_reminders():
     
     now = datetime.now(timezone.utc)
     current_month = now.strftime("%Y-%m")
-    day = now.day
+    
+    # Auto-generate payments for this month if not done yet
+    active_customers = await db.customers.find({"status": "active"}, {"_id": 0}).to_list(1000)
+    generated = 0
+    for customer in active_customers:
+        existing = await db.payments.find_one({"customer_id": customer["id"], "month": current_month})
+        if not existing:
+            prepaid = customer.get("prepaid_months", 0)
+            status = "paid" if prepaid > 0 else "unpaid"
+            payment = Payment(
+                customer_id=customer["id"],
+                customer_name=customer["name"],
+                month=current_month,
+                amount=customer["total_fee"],
+                status=status
+            )
+            await db.payments.insert_one(payment.model_dump())
+            if prepaid > 0:
+                await db.customers.update_one({"id": customer["id"]}, {"$inc": {"prepaid_months": -1}})
+            generated += 1
     
     settings = await db.settings.find_one({"id": "settings"}, {"_id": 0})
     if not settings:
         return {"success": False, "error": "App settings not configured"}
     
+    # Now send reminders to unpaid customers
     payments = await db.payments.find({"month": current_month, "status": "unpaid"}, {"_id": 0}).to_list(10000)
     customers = await db.customers.find({}, {"_id": 0}).to_list(10000)
     customer_map = {c["id"]: c for c in customers}
+    
+    day = now.day
     
     # Determine message based on day
     whish = settings.get("whish_number", "03022005")
@@ -3347,7 +3369,7 @@ If you have already paid, please ignore this message.
         {"$set": {"last_reminder_sent": now.isoformat()}}
     )
     
-    return {"success": True, "sent": sent, "failed": failed, "month": current_month, "message_type": message_type}
+    return {"success": True, "sent": sent, "failed": failed, "generated": generated, "month": current_month, "message_type": message_type}
 
 async def _check_offline_and_alert(force_send=False):
     """Internal: Check for offline machines and alert admin. force_send=True always sends alert."""
