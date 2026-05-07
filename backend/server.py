@@ -3132,7 +3132,7 @@ async def run_offline_check():
     return await _check_offline_and_alert()
 
 async def _send_auto_reminders():
-    """Internal: Send payment reminders for current month"""
+    """Internal: Send payment reminders with escalating urgency based on day of month"""
     from datetime import datetime, timezone
     
     client_tw = get_twilio_client()
@@ -3141,6 +3141,7 @@ async def _send_auto_reminders():
     
     now = datetime.now(timezone.utc)
     current_month = now.strftime("%Y-%m")
+    day = now.day
     
     settings = await db.settings.find_one({"id": "settings"}, {"_id": 0})
     if not settings:
@@ -3150,8 +3151,14 @@ async def _send_auto_reminders():
     customers = await db.customers.find({}, {"_id": 0}).to_list(10000)
     customer_map = {c["id"]: c for c in customers}
     
+    # Determine message based on day
+    whish = settings.get("whish_number", "03022005")
+    usdt = settings.get("usdt_address", "")
+    team = settings.get("team_name", "WKBeast Team")
+    
     sent = 0
     failed = 0
+    message_type = "day1"
     
     for payment in payments:
         customer = customer_map.get(payment.get("customer_id"))
@@ -3163,36 +3170,74 @@ async def _send_auto_reminders():
             continue
         
         phone_clean = format_phone_whatsapp(phone)
+        amount = payment.get("amount", 0)
+        
+        # Day 1: Friendly initial reminder
+        if day == 1:
+            message_type = "initial"
+            message = f"""📢 Dear Valued Customer,
+
+This is a kind reminder to please settle your hosting fees before the 2nd of each month, as we have major financial obligations to cover by that date.
+
+Unlike other farms, we don't request payments 6 months in advance — but we kindly ask for your cooperation in making the payment on time each month.
+
+🔹 {current_month} Hosting Fee: ${amount}
+🔹 Payment Options:
+• Whish: {whish}
+• USDT (BEP20 Network): {usdt}
+
+Thank you for your continued trust and support. Your timely payment helps us keep everything running smoothly.
+
+Warm regards,
+{team} 🐺💼"""
+
+        # Day 2: Reminder
+        elif day == 2:
+            message_type = "reminder"
+            message = f"""⏰ Friendly Reminder
+
+Hi! Just a quick follow-up — your hosting fee of ${amount} for {current_month} is still pending.
+
+Please settle it at your earliest convenience:
+• Whish: {whish}
+• USDT (BEP20): {usdt}
+
+Thank you!
+{team}"""
+
+        # Day 3: Final warning
+        elif day == 3:
+            message_type = "warning"
+            message = f"""⚠️ Important Notice
+
+Dear customer, your hosting fee of ${amount} for {current_month} is overdue.
+
+Please be advised that machines with unpaid fees will be powered off tonight at midnight.
+
+To avoid service interruption, please pay now:
+• Whish: {whish}
+• USDT (BEP20): {usdt}
+
+If you have already paid, please ignore this message.
+
+{team}"""
+
+        # Day 4+: Short reminder every 3 days
+        else:
+            message_type = "follow_up"
+            message = f"""📌 Payment still pending: ${amount} for {current_month}
+
+• Whish: {whish}
+• USDT (BEP20): {usdt}
+
+{team}"""
         
         try:
-            payment_template_sid = os.environ.get("TWILIO_TEMPLATE_PAYMENT", "")
-            if payment_template_sid:
-                import json
-                client_tw.messages.create(
-                    content_sid=payment_template_sid,
-                    content_variables=json.dumps({
-                        "1": current_month,
-                        "2": str(payment.get("amount", 0)),
-                        "3": settings.get("whish_number", ""),
-                        "4": settings.get("usdt_address", ""),
-                        "5": settings.get("team_name", "WKBeast")
-                    }),
-                    from_=get_whatsapp_from(),
-                    to=f"whatsapp:{phone_clean}"
-                )
-            else:
-                message = settings.get("message_template", "Payment reminder: ${amount} for {month}").format(
-                    month=current_month,
-                    amount=payment.get("amount", 0),
-                    whish=settings.get("whish_number", ""),
-                    usdt=settings.get("usdt_address", ""),
-                    team=settings.get("team_name", "WKBeast")
-                )
-                client_tw.messages.create(
-                    body=message,
-                    from_=get_whatsapp_from(),
-                    to=f"whatsapp:{phone_clean}"
-                )
+            client_tw.messages.create(
+                body=message,
+                from_=get_whatsapp_from(),
+                to=f"whatsapp:{phone_clean}"
+            )
             sent += 1
         except:
             failed += 1
@@ -3203,7 +3248,7 @@ async def _send_auto_reminders():
         {"$set": {"last_reminder_sent": now.isoformat()}}
     )
     
-    return {"success": True, "sent": sent, "failed": failed, "month": current_month}
+    return {"success": True, "sent": sent, "failed": failed, "month": current_month, "message_type": message_type}
 
 async def _check_offline_and_alert():
     """Internal: Check for offline machines and alert admin"""
@@ -3350,21 +3395,19 @@ async def bot_scheduler():
             
             # --- PAYMENT REMINDERS ---
             if bot_settings.get("auto_reminders_enabled"):
-                reminder_day = bot_settings.get("reminder_day", 1)
-                interval = bot_settings.get("reminder_interval_days", 3)
                 last_sent = bot_settings.get("last_reminder_sent")
                 
                 should_send = False
-                if now.day == reminder_day:
-                    # First of month — always send
-                    if not last_sent or last_sent[:7] != now.strftime("%Y-%m"):
+                # Days 1, 2, 3: send every day (escalating messages)
+                if now.day in [1, 2, 3]:
+                    if not last_sent or last_sent[:10] != now.strftime("%Y-%m-%d"):
                         should_send = True
-                elif now.day > reminder_day:
-                    # After first day — check interval
+                # Day 4+: send every 3 days
+                elif now.day > 3:
                     if last_sent:
                         last_dt = datetime.fromisoformat(last_sent.replace("Z", "+00:00")) if isinstance(last_sent, str) else last_sent
                         days_since = (now - last_dt).days
-                        if days_since >= interval:
+                        if days_since >= 3:
                             should_send = True
                     else:
                         should_send = True
