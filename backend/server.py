@@ -537,10 +537,9 @@ async def generate_whatsapp_links(month: str, include_paid: bool = False):
             team=settings["team_name"]
         )
         
-        # Clean phone number
-        phone = customer["phone"].replace(" ", "").replace("-", "").replace("+", "")
-        if not phone.startswith("961"):
-            phone = "961" + phone.lstrip("0")
+        # Clean phone number for wa.me link (needs number without +)
+        phone_formatted = format_phone_whatsapp(customer["phone"])
+        phone = phone_formatted.lstrip("+")
         
         # Create WhatsApp link
         import urllib.parse
@@ -2827,6 +2826,25 @@ def get_whatsapp_from():
     num = os.environ.get("TWILIO_WHATSAPP_NUMBER", "")
     return f"whatsapp:{num}" if num else ""
 
+def format_phone_whatsapp(phone):
+    """Format phone number for WhatsApp. Only adds +961 if 8 digits (Lebanese local)."""
+    phone = phone.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+    if phone.startswith("+"):
+        return phone
+    if phone.startswith("00"):
+        return "+" + phone[2:]
+    # Remove leading 0 for Lebanese numbers
+    if phone.startswith("0"):
+        phone = phone[1:]
+    # 8 digits = Lebanese local number
+    if len(phone) == 8:
+        return "+961" + phone
+    # Already has country code (starts with 961, 90, 1, etc.)
+    if phone.startswith("961") or phone.startswith("90") or phone.startswith("1"):
+        return "+" + phone
+    # Fallback: assume Lebanese
+    return "+961" + phone
+
 @api_router.post("/whatsapp/send")
 async def send_whatsapp_message(to: str, message: str):
     """Send a WhatsApp message to a customer"""
@@ -2834,15 +2852,7 @@ async def send_whatsapp_message(to: str, message: str):
     if not client:
         return {"success": False, "error": "Twilio not configured"}
     
-    # Format phone number
-    phone = to.replace(" ", "").replace("-", "")
-    if not phone.startswith("+"):
-        if phone.startswith("961"):
-            phone = "+" + phone
-        elif phone.startswith("0"):
-            phone = "+961" + phone[1:]
-        else:
-            phone = "+961" + phone
+    phone = format_phone_whatsapp(to)
     
     try:
         msg = client.messages.create(
@@ -2891,14 +2901,7 @@ async def send_payment_reminders(month: str):
             continue
         
         # Format phone
-        phone_clean = phone.replace(" ", "").replace("-", "")
-        if not phone_clean.startswith("+"):
-            if phone_clean.startswith("961"):
-                phone_clean = "+" + phone_clean
-            elif phone_clean.startswith("0"):
-                phone_clean = "+961" + phone_clean[1:]
-            else:
-                phone_clean = "+961" + phone_clean
+        phone_clean = format_phone_whatsapp(phone)
         
         # Format message from template
         import urllib.parse
@@ -2949,14 +2952,7 @@ async def send_single_reminder(customer_id: str, month: str):
     if not phone:
         return {"success": False, "error": "Customer has no phone number"}
     
-    phone_clean = phone.replace(" ", "").replace("-", "")
-    if not phone_clean.startswith("+"):
-        if phone_clean.startswith("961"):
-            phone_clean = "+" + phone_clean
-        elif phone_clean.startswith("0"):
-            phone_clean = "+961" + phone_clean[1:]
-        else:
-            phone_clean = "+961" + phone_clean
+    phone_clean = format_phone_whatsapp(phone)
     
     message = settings.get("message_template", "Payment reminder: ${amount} for {month}").format(
         month=month,
@@ -2998,7 +2994,7 @@ async def test_whatsapp_send(to: str):
         return {"success": False, "error": str(e)}
 
 @api_router.post("/whatsapp/notify-offline")
-async def notify_offline_machines(admin_phone: str = "+905464678877"):
+async def notify_offline_machines(admin_phone: str = "+9613022005"):
     """Check for offline machines and send WhatsApp alert to admin"""
     client = get_twilio_client()
     if not client:
@@ -3073,7 +3069,7 @@ async def get_bot_settings():
             "id": "bot_settings",
             "auto_reminders_enabled": False,
             "offline_alerts_enabled": False,
-            "admin_phone": "+905464678877",
+            "admin_phone": "+9613022005",
             "reminder_day": 1,
             "reminder_interval_days": 3,
             "last_reminder_sent": None,
@@ -3148,14 +3144,7 @@ async def _send_auto_reminders():
         if not phone:
             continue
         
-        phone_clean = phone.replace(" ", "").replace("-", "")
-        if not phone_clean.startswith("+"):
-            if phone_clean.startswith("961"):
-                phone_clean = "+" + phone_clean
-            elif phone_clean.startswith("0"):
-                phone_clean = "+961" + phone_clean[1:]
-            else:
-                phone_clean = "+961" + phone_clean
+        phone_clean = format_phone_whatsapp(phone)
         
         message = settings.get("message_template", "Payment reminder: ${amount} for {month}").format(
             month=current_month,
@@ -3193,7 +3182,7 @@ async def _check_offline_and_alert():
         return {"success": False, "error": "Twilio not configured"}
     
     bot_settings = await db.bot_settings.find_one({"id": "bot_settings"}, {"_id": 0})
-    admin_phone = bot_settings.get("admin_phone", "+905464678877") if bot_settings else "+905464678877"
+    admin_phone = bot_settings.get("admin_phone", "+9613022005") if bot_settings else "+9613022005"
     known_offline = set(bot_settings.get("known_offline_workers", [])) if bot_settings else set()
     
     # Fetch current machine status using watcher keys
