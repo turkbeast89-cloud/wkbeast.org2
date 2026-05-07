@@ -104,6 +104,17 @@ class PaymentUpdate(BaseModel):
     status: str
     amount: Optional[float] = None
 
+class Repair(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    customer_id: str
+    customer_name: str
+    description: str  # What was repaired
+    cost: float
+    status: str = "unpaid"  # unpaid, paid
+    paid_at: Optional[str] = None
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
 class Settings(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = "settings"
@@ -487,6 +498,92 @@ async def get_overdue_payments():
     return {"overdue_customers": result, "total_overdue": sum(c["total_owed"] for c in result), "total_customers": len(result)}
 
 
+
+# ==================== REPAIRS ====================
+
+@api_router.get("/repairs")
+async def get_repairs(customer_id: str = None):
+    """Get all repairs, optionally filtered by customer"""
+    query = {}
+    if customer_id:
+        query["customer_id"] = customer_id
+    repairs = await db.repairs.find(query, {"_id": 0}).sort("created_at", -1).to_list(10000)
+    return repairs
+
+@api_router.post("/repairs")
+async def create_repair(data: dict):
+    """Create a repair record for a customer"""
+    customer = await db.customers.find_one({"id": data.get("customer_id")}, {"_id": 0})
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    
+    repair = Repair(
+        customer_id=data["customer_id"],
+        customer_name=customer.get("name", ""),
+        description=data.get("description", ""),
+        cost=float(data.get("cost", 0))
+    )
+    await db.repairs.insert_one(repair.model_dump())
+    return repair.model_dump()
+
+@api_router.put("/repairs/{repair_id}")
+async def update_repair(repair_id: str, data: dict):
+    """Update a repair - mark as paid or edit"""
+    update_data = {}
+    if "status" in data:
+        update_data["status"] = data["status"]
+        if data["status"] == "paid":
+            update_data["paid_at"] = datetime.now(timezone.utc).isoformat()
+    if "description" in data:
+        update_data["description"] = data["description"]
+    if "cost" in data:
+        update_data["cost"] = float(data["cost"])
+    
+    result = await db.repairs.find_one_and_update(
+        {"id": repair_id},
+        {"$set": update_data},
+        return_document=True,
+        projection={"_id": 0}
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Repair not found")
+    
+    # Send WhatsApp confirmation if marked as paid
+    if data.get("status") == "paid":
+        try:
+            customer = await db.customers.find_one({"id": result["customer_id"]}, {"_id": 0})
+            if customer and customer.get("phone") and customer.get("whatsapp_enabled", True):
+                client_tw = get_twilio_client()
+                if client_tw:
+                    phone_clean = format_phone_whatsapp(customer["phone"])
+                    settings = await db.settings.find_one({"id": "settings"}, {"_id": 0})
+                    team = settings.get("team_name", "WKBeast Team") if settings else "WKBeast Team"
+                    msg = f"""✅ Repair Payment Confirmed
+
+Dear {customer.get('name', 'Customer')},
+
+Your repair fee of ${result['cost']} for "{result['description']}" has been marked as paid.
+
+Thank you!
+{team} 🐺💼
+
+━━━━━━━━━━━━━━━
+🤖 This is an automated message. Please do not reply to this number. For questions, contact us directly."""
+                    client_tw.messages.create(body=msg, from_=get_whatsapp_from(), to=f"whatsapp:{phone_clean}")
+        except:
+            pass
+    
+    return result
+
+@api_router.delete("/repairs/{repair_id}")
+async def delete_repair(repair_id: str):
+    """Delete a repair record"""
+    result = await db.repairs.delete_one({"id": repair_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Repair not found")
+    return {"success": True}
+
+
 # ==================== STATISTICS ====================
 
 @api_router.get("/stats")
@@ -844,6 +941,13 @@ async def export_full_backup():
     logs = await db.maintenance_logs.find({}, {"_id": 0}).to_list(10000)
     for l in logs:
         ws5.append([l.get("customer_id",""), l.get("machine_info",""), l.get("description",""), l.get("date","")])
+    
+    # 5b. Repairs sheet
+    ws5b = wb.create_sheet("Repairs")
+    ws5b.append(["Customer Name", "Description", "Cost", "Status", "Paid At", "Created At"])
+    repairs = await db.repairs.find({}, {"_id": 0}).to_list(10000)
+    for r in repairs:
+        ws5b.append([r.get("customer_name",""), r.get("description",""), r.get("cost",0), r.get("status",""), r.get("paid_at",""), r.get("created_at","")])
     
     # 6. Settings sheet
     ws6 = wb.create_sheet("Settings")
@@ -1231,6 +1335,9 @@ async def get_customer_dashboard(customer_id: str, all_ids: str = ""):
     # Get maintenance logs from ALL customers
     logs = await db.maintenance_logs.find({"customer_id": {"$in": customer_ids}}, {"_id": 0}).to_list(100)
     
+    # Get repairs for this customer
+    repairs = await db.repairs.find({"customer_id": {"$in": customer_ids}}, {"_id": 0}).sort("created_at", -1).to_list(100)
+    
     # Get farm stats with fluctuation
     import random
     farm_stats = await db.farm_stats.find_one({"id": "farm_stats"}, {"_id": 0})
@@ -1248,6 +1355,7 @@ async def get_customer_dashboard(customer_id: str, all_ids: str = ""):
         "total_monthly_profit": total_daily_profit * 30,
         "machine_statuses": machine_statuses,
         "payments": payments,
+        "repairs": repairs,
         "maintenance_logs": logs,
         "farm_stats": farm_stats
     }

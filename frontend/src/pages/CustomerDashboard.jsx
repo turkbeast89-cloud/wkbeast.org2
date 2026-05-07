@@ -236,7 +236,7 @@ const CustomerDashboard = ({ session, onLogout }) => {
     );
   }
 
-  const { customer, machine_statuses, payments, maintenance_logs, farm_stats } = dashboard || {};
+  const { customer, machine_statuses, payments, repairs, maintenance_logs, farm_stats } = dashboard || {};
 
   // Check for pending payment this month
   const currentMonth = new Date().toISOString().slice(0, 7); // e.g., "2026-03"
@@ -247,6 +247,11 @@ const CustomerDashboard = ({ session, onLogout }) => {
   // Calculate total overdue from previous months
   const overduePayments = payments?.filter(p => p.status === "unpaid" && p.month < currentMonth && p.amount > 0) || [];
   const totalOverdue = overduePayments.reduce((sum, p) => sum + (p.amount || 0), 0);
+  
+  // Repairs
+  const unpaidRepairs = repairs?.filter(r => r.status === "unpaid") || [];
+  const totalRepairBalance = unpaidRepairs.reduce((sum, r) => sum + (r.cost || 0), 0);
+  const paidRepairs = repairs?.filter(r => r.status === "paid") || [];
   
   // Get payment deadline based on payment status
   const paymentDeadline = getPaymentDeadline(hasPendingPayment && !isPaid);
@@ -444,6 +449,31 @@ const CustomerDashboard = ({ session, onLogout }) => {
             </div>
           </div>
         )}
+
+
+        {/* Repair Balance */}
+        {totalRepairBalance > 0 && customer?.status !== 'paused' && (
+          <div className="bg-gradient-to-r from-[#F59E0B]/10 to-[#0F0F0F] rounded-xl border border-[#F59E0B]/40 p-5" data-testid="repair-balance">
+            <div className="flex items-start gap-4">
+              <div className="p-3 rounded-full bg-[#F59E0B]/20">
+                <Wrench className="text-[#F59E0B]" size={24} />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-lg font-bold text-[#F59E0B]">Repair Balance: ${totalRepairBalance.toLocaleString()}</h3>
+                <p className="text-sm text-gray-400 mt-1">Your machine(s) were repaired. Please settle the repair fees:</p>
+                <div className="space-y-1 mt-2">
+                  {unpaidRepairs.map((r, i) => (
+                    <div key={i} className="flex justify-between items-center text-xs bg-[#F59E0B]/5 px-3 py-2 rounded border border-[#F59E0B]/10">
+                      <span className="text-gray-300">{r.description}</span>
+                      <span className="text-[#F59E0B] font-bold">${r.cost?.toLocaleString()}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
 
         {/* Pending Payment Alert */}
         {hasPendingPayment && !isPaid && customer?.status !== 'paused' && (
@@ -790,6 +820,29 @@ const CustomerDashboard = ({ session, onLogout }) => {
             
             {(!payments || payments.length === 0) && (
               <p className="text-center text-gray-500 py-4">No payment history</p>
+            )}
+            
+            {/* Paid Repairs in History */}
+            {paidRepairs.length > 0 && (
+              <>
+                <div className="border-t border-[#27272A] pt-3 mt-3">
+                  <p className="text-xs text-gray-500 mb-2 uppercase tracking-wide">Repair Payments</p>
+                </div>
+                {paidRepairs.map((r, idx) => (
+                  <div key={`repair-${idx}`} className="flex items-center justify-between py-3 border-b border-[#27272A] last:border-0">
+                    <div>
+                      <p className="font-medium text-white">{r.description}</p>
+                      <p className="text-xs text-gray-500">
+                        Repair - Paid on {r.paid_at ? new Date(r.paid_at).toLocaleDateString() : 'N/A'}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="font-mono text-lg text-white">${r.cost?.toLocaleString()}</span>
+                      <CheckCircle className="text-[#00E054]" size={20} />
+                    </div>
+                  </div>
+                ))}
+              </>
             )}
           </div>
         </div>

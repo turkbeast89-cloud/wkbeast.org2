@@ -68,6 +68,9 @@ const AdminPanel = () => {
   const [expandedHistory, setExpandedHistory] = useState(null);
   const [broadcastMessage, setBroadcastMessage] = useState("");
   const [broadcastSending, setBroadcastSending] = useState(false);
+  const [repairs, setRepairs] = useState([]);
+  const [showRepairModal, setShowRepairModal] = useState(false);
+  const [repairForm, setRepairForm] = useState({ customer_id: "", description: "", cost: "" });
 
   useEffect(() => {
     fetchData();
@@ -75,18 +78,20 @@ const AdminPanel = () => {
 
   const fetchData = async () => {
     try {
-      const [accountsRes, customersRes, statsRes, logsRes, viaBtcRes, botRes] = await Promise.all([
+      const [accountsRes, customersRes, statsRes, logsRes, viaBtcRes, botRes, repairsRes] = await Promise.all([
         axios.get(`${API}/customer-accounts`),
         axios.get(`${API}/customers`),
         axios.get(`${API}/farm-stats`),
         axios.get(`${API}/maintenance-logs`),
         axios.get(`${API}/viabtc-settings`),
-        axios.get(`${API}/bot-settings`)
+        axios.get(`${API}/bot-settings`),
+        axios.get(`${API}/repairs`)
       ]);
       setAccounts(accountsRes.data);
       setCustomers(customersRes.data);
       setFarmStats(statsRes.data);
       setMaintenanceLogs(logsRes.data);
+      setRepairs(repairsRes.data);
       setViaBtcSettings({
         access_key: viaBtcRes.data.access_key || "",
         secret_key: viaBtcRes.data.secret_key || "",
@@ -878,6 +883,126 @@ const AdminPanel = () => {
           <p className="text-sm text-gray-500">No messages sent yet. Click "Load History" to view sent messages.</p>
         )}
       </div>
+
+      {/* Repairs */}
+      <div className="card p-6" data-testid="repairs-section">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Wrench className="text-[#F59E0B]" size={20} />
+            <h2 className="text-lg font-bold text-white">Repairs</h2>
+            {repairs.filter(r => r.status === 'unpaid').length > 0 && (
+              <span className="text-xs bg-[#F59E0B]/20 text-[#F59E0B] px-2 py-0.5 rounded-full">
+                {repairs.filter(r => r.status === 'unpaid').length} unpaid
+              </span>
+            )}
+          </div>
+          <Button onClick={() => { setRepairForm({ customer_id: "", description: "", cost: "" }); setShowRepairModal(true); }} className="bg-[#F59E0B] text-black" data-testid="add-repair-btn">
+            <Plus size={16} className="mr-2" /> Add Repair
+          </Button>
+        </div>
+        
+        {repairs.length > 0 ? (
+          <div className="space-y-2 max-h-[300px] overflow-y-auto">
+            {repairs.map(repair => (
+              <div key={repair.id} className={`bg-[#0A0A0A] rounded-lg border p-3 flex items-center justify-between ${repair.status === 'unpaid' ? 'border-[#F59E0B]/30' : 'border-[#27272A]'}`}>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-white">{repair.customer_name}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded ${repair.status === 'unpaid' ? 'bg-[#F59E0B]/20 text-[#F59E0B]' : 'bg-[#00E054]/20 text-[#00E054]'}`}>
+                      {repair.status}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">{repair.description}</p>
+                  <p className="text-xs text-gray-500">{new Date(repair.created_at).toLocaleDateString()}</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-lg font-bold text-white">${repair.cost?.toLocaleString()}</span>
+                  {repair.status === 'unpaid' && (
+                    <Button size="sm" variant="outline" className="border-[#00E054] text-[#00E054] text-xs"
+                      onClick={async () => {
+                        try {
+                          await axios.put(`${API}/repairs/${repair.id}`, { status: "paid" });
+                          toast.success(`Repair marked as paid for ${repair.customer_name}`);
+                          fetchData();
+                        } catch (e) { toast.error("Failed"); }
+                      }}
+                    >Mark Paid</Button>
+                  )}
+                  <Button size="icon" variant="ghost" className="text-red-400"
+                    onClick={async () => {
+                      if (!window.confirm("Delete this repair?")) return;
+                      try {
+                        await axios.delete(`${API}/repairs/${repair.id}`);
+                        toast.success("Repair deleted");
+                        fetchData();
+                      } catch (e) { toast.error("Failed"); }
+                    }}
+                  ><Trash2 size={14} /></Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500">No repairs recorded.</p>
+        )}
+      </div>
+
+      {/* Repair Modal */}
+      {showRepairModal && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+          <div className="bg-[#1A1A1A] rounded-xl border border-[#27272A] p-6 w-full max-w-md">
+            <h3 className="text-lg font-bold text-white mb-4">Add Repair</h3>
+            <div className="space-y-3">
+              <div>
+                <Label className="text-xs text-gray-400">Customer</Label>
+                <select
+                  className="w-full bg-[#0A0A0A] border border-[#27272A] rounded-lg p-2 text-sm text-white"
+                  value={repairForm.customer_id}
+                  onChange={(e) => setRepairForm({ ...repairForm, customer_id: e.target.value })}
+                >
+                  <option value="">Select customer...</option>
+                  {customers.filter(c => c.status !== 'paused').map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <Label className="text-xs text-gray-400">Description (what was repaired)</Label>
+                <Input
+                  className="bg-[#0A0A0A] border-[#27272A]"
+                  placeholder="e.g., Fan replacement, PSU repair..."
+                  value={repairForm.description}
+                  onChange={(e) => setRepairForm({ ...repairForm, description: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label className="text-xs text-gray-400">Cost ($)</Label>
+                <Input
+                  type="number"
+                  className="bg-[#0A0A0A] border-[#27272A]"
+                  placeholder="0"
+                  value={repairForm.cost}
+                  onChange={(e) => setRepairForm({ ...repairForm, cost: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-4">
+              <Button variant="outline" className="flex-1 border-[#27272A]" onClick={() => setShowRepairModal(false)}>Cancel</Button>
+              <Button className="flex-1 bg-[#F59E0B] text-black" onClick={async () => {
+                if (!repairForm.customer_id || !repairForm.description || !repairForm.cost) {
+                  toast.error("Fill all fields"); return;
+                }
+                try {
+                  await axios.post(`${API}/repairs`, repairForm);
+                  toast.success("Repair added");
+                  setShowRepairModal(false);
+                  fetchData();
+                } catch (e) { toast.error("Failed"); }
+              }}>Add Repair</Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Maintenance Logs */}
       <div className="card p-6">
