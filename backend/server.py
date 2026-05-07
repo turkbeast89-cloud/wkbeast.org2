@@ -2827,23 +2827,20 @@ def get_whatsapp_from():
     return f"whatsapp:{num}" if num else ""
 
 def format_phone_whatsapp(phone):
-    """Format phone number for WhatsApp. Only adds +961 if 8 digits (Lebanese local)."""
+    """Format phone number for WhatsApp. Only adds +961 if it's a Lebanese local number."""
     phone = phone.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
     if phone.startswith("+"):
         return phone
     if phone.startswith("00"):
         return "+" + phone[2:]
-    # Remove leading 0 for Lebanese numbers
-    if phone.startswith("0"):
-        phone = phone[1:]
-    # 8 digits = Lebanese local number
-    if len(phone) == 8:
+    # Lebanese local: starts with 0 and is 8 digits (0X XXXXXX) 
+    if phone.startswith("0") and len(phone) == 8:
+        return "+961" + phone[1:]
+    # 7 digits without 0 = Lebanese local
+    if len(phone) == 7:
         return "+961" + phone
-    # Already has country code (starts with 961, 90, 1, etc.)
-    if phone.startswith("961") or phone.startswith("90") or phone.startswith("1"):
-        return "+" + phone
-    # Fallback: assume Lebanese
-    return "+961" + phone
+    # Everything else: already has country code, just add +
+    return "+" + phone
 
 @api_router.post("/whatsapp/send")
 async def send_whatsapp_message(to: str, message: str):
