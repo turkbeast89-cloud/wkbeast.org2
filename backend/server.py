@@ -3454,21 +3454,7 @@ async def _check_offline_and_alert(force_send=False):
     else:
         # Auto check: only report changes
         newly_offline = current_offline - known_offline
-        
-        # For "back online" — require machine to be missing from offline for 2 consecutive checks
-        # Use a "pending_online" list to track machines that need a second confirmation
-        pending_online = set(bot_settings.get("pending_online_workers", [])) if bot_settings else set()
-        potentially_online = known_offline - current_offline
-        
-        # Only confirm "back online" if it was also pending (seen online on previous check too)
-        back_online = potentially_online & pending_online
-        
-        # Update pending: machines that appear online this check but weren't confirmed yet
-        new_pending = potentially_online - back_online
-        await db.bot_settings.update_one(
-            {"id": "bot_settings"},
-            {"$set": {"pending_online_workers": list(new_pending)}}
-        )
+        back_online = known_offline - current_offline
     
     messages_sent = []
     template_sid = os.environ.get("TWILIO_TEMPLATE_OFFLINE", "")
