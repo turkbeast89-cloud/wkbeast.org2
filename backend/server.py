@@ -3068,6 +3068,18 @@ async def notify_offline_machines(admin_phone: str = "+9613022005"):
         else:
             return "Unknown"
     
+    # Build machine info per customer from DB
+    customer_machine_info = {}
+    for c in customers:
+        machines = c.get("machines", [])
+        if len(machines) == 1:
+            customer_machine_info[c["id"]] = machines[0].get("machine_name", "Unknown")
+        elif len(machines) > 1:
+            info_parts = [f"{m.get('quantity',1)}x {m.get('machine_name','')}" for m in machines]
+            customer_machine_info[c["id"]] = ", ".join(info_parts)
+        else:
+            customer_machine_info[c["id"]] = "Unknown"
+    
     offline_machines = []
     
     for acc in customer_accounts:
@@ -3077,6 +3089,8 @@ async def notify_offline_machines(admin_phone: str = "+9613022005"):
         customer = customer_map.get(acc.get("customer_id"), {})
         if customer.get("status") == "paused":
             continue
+        
+        machine_info = customer_machine_info.get(customer.get("id", ""), "Unknown")
         
         try:
             async with aiohttp.ClientSession() as session:
@@ -3088,14 +3102,12 @@ async def notify_offline_machines(admin_phone: str = "+9613022005"):
                             status = w.get("worker_status", w.get("status", ""))
                             if status in ["offline", "unactive"]:
                                 last_active = w.get("last_active", 0)
-                                hashrate_raw = int(w.get("hashrate_1day", 0) or w.get("hashrate_1hour", 0) or 0)
-                                hashrate_gh = hashrate_raw / 1_000_000_000
                                 import time as t
                                 offline_mins = int((t.time() - last_active) / 60) if last_active else 0
                                 offline_machines.append({
                                     "name": w.get("worker_name", w.get("name", "")),
                                     "account": customer.get("name", acc.get("worker_name", "")),
-                                    "machine_type": detect_machine_type(hashrate_gh),
+                                    "machine_type": machine_info,
                                     "minutes_offline": offline_mins
                                 })
         except:
@@ -3384,17 +3396,23 @@ async def _check_offline_and_alert():
             "display_name": "turkbeast (Main)"
         })
     
-    # Build machine type lookup based on hashrate
-    def detect_machine_type(hashrate_gh):
-        """Detect machine type from hashrate in GH/s"""
-        if 11 <= hashrate_gh <= 17:
-            return "L9"
-        elif 7 <= hashrate_gh <= 10:
-            return "L7"
-        elif 3 <= hashrate_gh <= 6:
-            return "L1"
+    # Build machine type lookup per customer from DB
+    customer_machine_info = {}
+    for c in customers:
+        machines = c.get("machines", [])
+        if len(machines) == 1:
+            customer_machine_info[c["id"]] = machines[0].get("machine_name", "Unknown")
+        elif len(machines) > 1:
+            # Multiple machine types - show count per type
+            info_parts = [f"{m.get('quantity',1)}x {m.get('machine_name','')}" for m in machines]
+            customer_machine_info[c["id"]] = ", ".join(info_parts)
         else:
-            return "Unknown"
+            customer_machine_info[c["id"]] = "Unknown"
+    
+    # Also map by worker_name for customer_accounts lookup
+    account_to_customer_id = {}
+    for acc in customer_accounts:
+        account_to_customer_id[acc.get("worker_name", "")] = acc.get("customer_id", "")
     
     current_offline = set()
     offline_details = []
@@ -3403,6 +3421,11 @@ async def _check_offline_and_alert():
         for acc in watcher_accounts:
             watcher_key = acc["watcher_key"]
             display_name = acc["display_name"]
+            worker_name = acc.get("worker_name", "")
+            
+            # Get customer's machine info
+            cust_id = account_to_customer_id.get(worker_name, "")
+            machine_info = customer_machine_info.get(cust_id, "Unknown")
             
             try:
                 url = f"https://www.viabtc.com/res/observer/worker?access_key={watcher_key}&coin=LTC"
@@ -3412,15 +3435,11 @@ async def _check_offline_and_alert():
                         for w in data.get("data", {}).get("data", []):
                             wname = w.get("worker_name", w.get("name", ""))
                             status = w.get("worker_status", w.get("status", ""))
-                            worker_id = f"{acc.get('worker_name', '')}:{wname}"
+                            worker_id = f"{worker_name}:{wname}"
                             
                             if status in ["offline", "unactive"]:
                                 current_offline.add(worker_id)
                                 last_active = w.get("last_active", 0)
-                                # Get hashrate from 1day average (more reliable for offline machines)
-                                hashrate_raw = int(w.get("hashrate_1day", 0) or w.get("hashrate_1hour", 0) or 0)
-                                hashrate_gh = hashrate_raw / 1_000_000_000  # Convert to GH/s
-                                machine_type = detect_machine_type(hashrate_gh)
                                 
                                 import time as t
                                 offline_mins = int((t.time() - last_active) / 60) if last_active else 0
@@ -3428,7 +3447,7 @@ async def _check_offline_and_alert():
                                     "worker_id": worker_id,
                                     "name": wname,
                                     "account": display_name,
-                                    "machine_type": machine_type,
+                                    "machine_type": machine_info,
                                     "minutes_offline": offline_mins
                                 })
             except:
