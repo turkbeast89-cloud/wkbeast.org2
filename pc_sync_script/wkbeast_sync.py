@@ -247,8 +247,38 @@ def execute_command(cmd):
             
         elif action == "change_worker":
             new_worker = cmd.get("params", {}).get("worker_name", "")
-            print(f"  -> Change worker on {ip} to {new_worker}")
-            result = f"Worker change to {new_worker} - requires manual config"
+            pool_url = cmd.get("params", {}).get("pool_url", "")
+            try:
+                # Get current pools to find which one to modify
+                pools_data = send_cgminer_command(ip, "pools")
+                if pools_data and "POOLS" in pools_data:
+                    # Find active pool
+                    for pool in pools_data["POOLS"]:
+                        if pool.get("Stratum Active") or pool.get("Status") == "Alive":
+                            pool_id = pool.get("POOL", 0)
+                            current_url = pool.get("URL", "")
+                            # Remove old pool and add new one with new worker
+                            if pool_url:
+                                send_cgminer_command(ip, f"addpool|{pool_url},{new_worker},x")
+                            else:
+                                send_cgminer_command(ip, f"addpool|{current_url},{new_worker},x")
+                            # Switch to the new pool
+                            send_cgminer_command(ip, f"switchpool|{len(pools_data['POOLS'])}")
+                            result = f"Worker changed to {new_worker} on {ip}"
+                            break
+                    else:
+                        result = f"No active pool found on {ip}"
+                else:
+                    # Try direct approach - some firmwares support this
+                    from requests.auth import HTTPDigestAuth
+                    r = requests.post(f"http://{ip}/cgi-bin/set_miner_conf.cgi",
+                                    auth=HTTPDigestAuth(MINER_USER, MINER_PASS),
+                                    json={"pools": [{"url": pool_url or "stratum+tcp://ltc.viabtc.com:3002", "user": new_worker, "pass": "x"}]},
+                                    timeout=10)
+                    result = f"Config update sent to {ip} (status {r.status_code})"
+            except Exception as e:
+                result = f"Failed to change worker: {str(e)}"
+            print(f"  -> {result}")
             
         elif action == "change_pool":
             new_pool = cmd.get("params", {}).get("pool_url", "")

@@ -646,6 +646,119 @@ async def delete_machine(ip: str):
     return {"success": True}
 
 
+
+@api_router.post("/machine-data/switch-workers")
+async def switch_workers(data: dict):
+    """Switch workers on selected or all machines to a new wallet"""
+    new_worker = data.get("new_worker", "")
+    pool_url = data.get("pool_url", "")
+    machine_ips = data.get("ips", [])  # Empty = all customer machines
+    
+    if not new_worker:
+        raise HTTPException(status_code=400, detail="new_worker is required")
+    
+    # If no specific IPs, get all customer machines
+    if not machine_ips:
+        accounts = await db.customer_accounts.find({}, {"_id": 0, "worker_name": 1}).to_list(10000)
+        customer_workers = set(a.get("worker_name", "").lower().strip() for a in accounts if a.get("worker_name"))
+        
+        all_machines = await db.machine_live_data.find({}, {"_id": 0}).to_list(10000)
+        for m in all_machines:
+            worker = m.get("worker_name", "").lower().strip()
+            for cw in customer_workers:
+                if cw in worker or worker in cw:
+                    machine_ips.append(m["ip"])
+                    break
+    
+    # Save original workers before switching (for restore)
+    originals = []
+    commands_created = 0
+    
+    for ip in machine_ips:
+        machine = await db.machine_live_data.find_one({"ip": ip}, {"_id": 0})
+        if machine:
+            originals.append({"ip": ip, "original_worker": machine.get("worker_name", "")})
+            
+            # Look up farm for this machine
+            farm = machine.get("farm", "Main Farm")
+            
+            cmd = {
+                "id": str(uuid.uuid4()),
+                "ip": ip,
+                "action": "change_worker",
+                "params": {"worker_name": new_worker, "pool_url": pool_url},
+                "farm": farm,
+                "status": "pending",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "completed_at": None,
+                "result": None
+            }
+            await db.machine_commands.insert_one(cmd)
+            commands_created += 1
+    
+    # Save originals for restore
+    await db.wallet_switch.update_one(
+        {"id": "wallet_switch"},
+        {"$set": {
+            "id": "wallet_switch",
+            "switched": True,
+            "new_worker": new_worker,
+            "originals": originals,
+            "switched_at": datetime.now(timezone.utc).isoformat()
+        }},
+        upsert=True
+    )
+    
+    return {"success": True, "commands": commands_created, "machines": len(machine_ips)}
+
+@api_router.post("/machine-data/restore-workers")
+async def restore_workers():
+    """Restore all workers back to their original wallet"""
+    switch_data = await db.wallet_switch.find_one({"id": "wallet_switch"}, {"_id": 0})
+    if not switch_data or not switch_data.get("switched"):
+        return {"success": False, "error": "No active wallet switch to restore"}
+    
+    originals = switch_data.get("originals", [])
+    commands_created = 0
+    
+    for item in originals:
+        ip = item["ip"]
+        original_worker = item["original_worker"]
+        
+        machine = await db.machine_live_data.find_one({"ip": ip}, {"_id": 0})
+        farm = machine.get("farm", "Main Farm") if machine else "Main Farm"
+        
+        cmd = {
+            "id": str(uuid.uuid4()),
+            "ip": ip,
+            "action": "change_worker",
+            "params": {"worker_name": original_worker},
+            "farm": farm,
+            "status": "pending",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "completed_at": None,
+            "result": None
+        }
+        await db.machine_commands.insert_one(cmd)
+        commands_created += 1
+    
+    # Mark as restored
+    await db.wallet_switch.update_one(
+        {"id": "wallet_switch"},
+        {"$set": {"switched": False, "restored_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    
+    return {"success": True, "commands": commands_created, "restored": len(originals)}
+
+@api_router.get("/machine-data/switch-status")
+async def get_switch_status():
+    """Check if workers are currently switched"""
+    switch_data = await db.wallet_switch.find_one({"id": "wallet_switch"}, {"_id": 0})
+    if not switch_data:
+        return {"switched": False}
+    return switch_data
+
+
     return {"success": True}
 
 
