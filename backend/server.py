@@ -3057,6 +3057,13 @@ async def notify_offline_machines(admin_phone: str = "+9613022005"):
     customers = await db.customers.find({}, {"_id": 0}).to_list(1000)
     customer_map = {c["id"]: c for c in customers}
     
+    # Build machine type lookup per customer
+    customer_machines = {}
+    for c in customers:
+        machines = c.get("machines", [])
+        machine_names = [m.get("machine_name", "") for m in machines]
+        customer_machines[c["id"]] = ", ".join(machine_names) if machine_names else "Unknown"
+    
     offline_machines = []
     
     for acc in customer_accounts:
@@ -3066,6 +3073,8 @@ async def notify_offline_machines(admin_phone: str = "+9613022005"):
         customer = customer_map.get(acc.get("customer_id"), {})
         if customer.get("status") == "paused":
             continue
+        
+        machine_type = customer_machines.get(customer.get("id", ""), "Unknown")
         
         try:
             async with aiohttp.ClientSession() as session:
@@ -3082,6 +3091,7 @@ async def notify_offline_machines(admin_phone: str = "+9613022005"):
                                 offline_machines.append({
                                     "name": w.get("worker_name", w.get("name", "")),
                                     "account": customer.get("name", acc.get("worker_name", "")),
+                                    "machine_type": machine_type,
                                     "minutes_offline": offline_mins
                                 })
         except:
@@ -3096,7 +3106,7 @@ async def notify_offline_machines(admin_phone: str = "+9613022005"):
         hrs = m["minutes_offline"] // 60
         mins = m["minutes_offline"] % 60
         time_str = f"{hrs}h {mins}m" if hrs > 0 else f"{mins}m"
-        details += f"❌ {m['name']} ({m['account']}) - offline {time_str}\n"
+        details += f"❌ {m['name']} ({m['account']}) [{m.get('machine_type', 'Unknown')}] - offline {time_str}\n"
     
     try:
         phone = admin_phone if admin_phone.startswith("+") else "+" + admin_phone
@@ -3344,6 +3354,13 @@ async def _check_offline_and_alert():
     customers = await db.customers.find({}, {"_id": 0}).to_list(1000)
     customer_map = {c["id"]: c for c in customers}
     
+    # Build machine type lookup per customer
+    customer_machines = {}
+    for c in customers:
+        machines = c.get("machines", [])
+        machine_names = [m.get("machine_name", "") for m in machines]
+        customer_machines[c["id"]] = ", ".join(machine_names) if machine_names else "Unknown"
+    
     current_offline = set()
     offline_details = []
     
@@ -3355,6 +3372,9 @@ async def _check_offline_and_alert():
             customer = customer_map.get(acc.get("customer_id"), {})
             if customer.get("status") == "paused":
                 continue
+            
+            # Get machine types for this customer
+            machine_type = customer_machines.get(customer.get("id", ""), "Unknown")
             
             try:
                 url = f"https://www.viabtc.com/res/observer/worker?access_key={watcher_key}&coin=LTC"
@@ -3375,6 +3395,7 @@ async def _check_offline_and_alert():
                                     "worker_id": worker_id,
                                     "name": wname,
                                     "account": customer.get("name", acc.get("worker_name", "")),
+                                    "machine_type": machine_type,
                                     "minutes_offline": offline_mins
                                 })
             except:
@@ -3393,7 +3414,7 @@ async def _check_offline_and_alert():
         for worker_id in newly_offline:
             detail = next((d for d in offline_details if d["worker_id"] == worker_id), None)
             if detail:
-                details += f"❌ {detail['name']} ({detail['account']})\n"
+                details += f"❌ {detail['name']} ({detail['account']}) [{detail.get('machine_type', 'Unknown')}]\n"
             else:
                 details += f"❌ {worker_id}\n"
         
