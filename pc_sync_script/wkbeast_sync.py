@@ -25,7 +25,7 @@ SYNC_INTERVAL = 120                    # Push data every 2 minutes (seconds)
 
 # Path to MineFleet config (same folder as this script)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-MINEFLEET_CONFIG = os.path.join(SCRIPT_DIR, "minefleet_config.json")
+MINEFLEET_CONFIG = os.path.join(SCRIPT_DIR, "wkbeast_config.json")
 # ================================
 
 
