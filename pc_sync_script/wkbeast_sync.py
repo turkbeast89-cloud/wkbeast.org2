@@ -218,17 +218,27 @@ def execute_command(cmd):
     
     try:
         if action == "reboot":
-            # Try CGMiner restart
-            response = send_cgminer_command(ip, "restart")
-            if response:
-                result = "Reboot command sent via CGMiner"
-            else:
-                # Try HTTP reboot as fallback
+            # Try HTTP reboot for Bitmain/Antminer (most common)
+            try:
+                import urllib3
+                urllib3.disable_warnings()
+                r = requests.post(f"http://{ip}/cgi-bin/reboot.cgi", 
+                                auth=("root", "root"), timeout=10)
+                result = f"HTTP reboot sent (status {r.status_code})"
+            except:
                 try:
-                    r = requests.post(f"http://{ip}/cgi-bin/reboot.cgi", timeout=5)
-                    result = f"HTTP reboot sent (status {r.status_code})"
+                    # Try digest auth (some firmware versions)
+                    from requests.auth import HTTPDigestAuth
+                    r = requests.post(f"http://{ip}/cgi-bin/reboot.cgi",
+                                    auth=HTTPDigestAuth("root", "root"), timeout=10)
+                    result = f"HTTP digest reboot sent (status {r.status_code})"
                 except:
-                    result = "Failed - could not connect to miner"
+                    # Last resort: CGMiner API restart
+                    response = send_cgminer_command(ip, "restart")
+                    if response:
+                        result = "CGMiner restart command sent"
+                    else:
+                        result = "Failed - could not connect to miner"
             print(f"  -> {result}")
             
         elif action == "change_worker":
