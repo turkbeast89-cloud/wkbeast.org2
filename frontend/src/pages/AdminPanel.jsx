@@ -66,6 +66,8 @@ const AdminPanel = () => {
   });
   const [messageHistory, setMessageHistory] = useState(null);
   const [expandedHistory, setExpandedHistory] = useState(null);
+  const [broadcastMessage, setBroadcastMessage] = useState("");
+  const [broadcastSending, setBroadcastSending] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -750,6 +752,50 @@ const AdminPanel = () => {
             data-testid="test-whatsapp-btn"
           >
             Test WhatsApp
+          </Button>
+        </div>
+      </div>
+
+      {/* Broadcast Message to All Customers */}
+      <div className="card p-6" data-testid="whatsapp-broadcast">
+        <div className="flex items-center gap-2 mb-4">
+          <MessageSquare className="text-[#25D366]" size={20} />
+          <h2 className="text-lg font-bold text-white">Broadcast Message</h2>
+          <span className="text-xs text-gray-500 ml-2">Send to all active customers</span>
+        </div>
+        <textarea
+          className="w-full bg-[#0A0A0A] border border-[#27272A] rounded-lg p-3 text-sm text-white resize-none focus:border-[#25D366] outline-none"
+          rows={4}
+          placeholder="Type your message here... It will be sent to all active customers via WhatsApp."
+          value={broadcastMessage}
+          onChange={(e) => setBroadcastMessage(e.target.value)}
+          data-testid="broadcast-input"
+        />
+        <div className="flex items-center justify-between mt-3">
+          <span className="text-xs text-gray-500">{broadcastMessage.length} characters</span>
+          <Button
+            size="sm"
+            disabled={!broadcastMessage.trim() || broadcastSending}
+            className="bg-[#25D366] hover:bg-[#25D366]/80 text-black font-medium"
+            onClick={async () => {
+              if (!window.confirm(`Send this message to ALL active customers?`)) return;
+              setBroadcastSending(true);
+              try {
+                const res = await axios.post(`${API}/whatsapp/broadcast`, { message: broadcastMessage });
+                if (res.data.success) {
+                  toast.success(`Sent to ${res.data.sent} customers! (${res.data.failed} failed)`);
+                  setBroadcastMessage("");
+                } else {
+                  toast.error(res.data.error);
+                }
+              } catch (e) {
+                toast.error("Failed to send broadcast");
+              }
+              setBroadcastSending(false);
+            }}
+            data-testid="broadcast-send-btn"
+          >
+            {broadcastSending ? "Sending..." : "Send to All"}
           </Button>
         </div>
       </div>

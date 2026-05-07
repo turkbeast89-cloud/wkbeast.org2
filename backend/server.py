@@ -3491,6 +3491,70 @@ async def whatsapp_webhook(request: Request):
 
 # ==================== PAYMENT CONFIRMATION NOTIFICATION ====================
 
+
+@api_router.post("/whatsapp/broadcast")
+async def broadcast_whatsapp(data: dict):
+    """Send a message to ALL active customers"""
+    client_tw = get_twilio_client()
+    if not client_tw:
+        return {"success": False, "error": "Twilio not configured"}
+    
+    message = data.get("message", "")
+    if not message.strip():
+        return {"success": False, "error": "Message cannot be empty"}
+    
+    # Add bot disclaimer
+    full_message = f"""{message}
+
+━━━━━━━━━━━━━━━
+🤖 This is an automated message. Please do not reply to this number. For questions, contact us directly."""
+    
+    customers = await db.customers.find({"status": {"$ne": "paused"}}, {"_id": 0}).to_list(10000)
+    
+    from datetime import datetime, timezone
+    sent = 0
+    failed = 0
+    
+    for customer in customers:
+        phone = customer.get("phone", "")
+        if not phone:
+            continue
+        
+        phone_clean = format_phone_whatsapp(phone)
+        
+        try:
+            client_tw.messages.create(
+                body=full_message,
+                from_=get_whatsapp_from(),
+                to=f"whatsapp:{phone_clean}"
+            )
+            await db.whatsapp_logs.insert_one({
+                "customer_id": customer.get("id", ""),
+                "customer_name": customer.get("name", ""),
+                "phone": phone_clean,
+                "message": full_message,
+                "type": "broadcast",
+                "direction": "outbound",
+                "status": "sent",
+                "created_at": datetime.now(timezone.utc).isoformat()
+            })
+            sent += 1
+        except Exception as e:
+            await db.whatsapp_logs.insert_one({
+                "customer_id": customer.get("id", ""),
+                "customer_name": customer.get("name", ""),
+                "phone": phone_clean,
+                "message": full_message,
+                "type": "broadcast",
+                "direction": "outbound",
+                "status": f"failed: {str(e)}",
+                "created_at": datetime.now(timezone.utc).isoformat()
+            })
+            failed += 1
+    
+    return {"success": True, "sent": sent, "failed": failed, "total_customers": len(customers)}
+
+
 @api_router.post("/whatsapp/send-payment-confirmation")
 async def send_payment_confirmation(customer_id: str, month: str):
     """Send payment confirmation message to customer"""
