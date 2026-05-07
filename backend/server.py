@@ -521,14 +521,16 @@ async def push_machine_data(data: dict):
     hidden = await db.machine_hidden.find({}, {"_id": 0}).to_list(10000)
     hidden_ips = set(h.get("ip", "") for h in hidden)
     
+    # Get all manually renamed machines in one query
+    renamed = await db.machine_live_data.find({"manually_renamed": True}, {"_id": 0, "ip": 1}).to_list(10000)
+    renamed_ips = set(m.get("ip", "") for m in renamed)
+    
     synced = 0
+    ops = []
     for m in machines:
         ip = m.get("ip", "")
         if not ip or ip in hidden_ips:
             continue
-        
-        # Check if this machine was manually renamed — don't overwrite the name
-        existing = await db.machine_live_data.find_one({"ip": ip}, {"_id": 0})
         
         update_data = {
             "ip": ip,
@@ -543,19 +545,16 @@ async def push_machine_data(data: dict):
             "updated_at": datetime.now(timezone.utc).isoformat()
         }
         
-        # Only set worker_name and model if not manually renamed
-        if existing and existing.get("manually_renamed"):
-            pass  # Keep the manual name
-        else:
+        if ip not in renamed_ips:
             update_data["worker_name"] = m.get("worker_name", "")
             update_data["model"] = m.get("model", "")
         
-        await db.machine_live_data.update_one(
-            {"ip": ip},
-            {"$set": update_data},
-            upsert=True
-        )
+        from pymongo import UpdateOne
+        ops.append(UpdateOne({"ip": ip}, {"$set": update_data}, upsert=True))
         synced += 1
+    
+    if ops:
+        await db.machine_live_data.bulk_write(ops)
     
     return {"success": True, "synced": synced}
 

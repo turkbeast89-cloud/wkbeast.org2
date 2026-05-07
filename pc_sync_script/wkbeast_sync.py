@@ -182,20 +182,27 @@ def get_machine_data():
 
 
 def push_data(machines):
-    """Push machine data to wkbeast.org"""
-    try:
-        resp = requests.post(
-            f"{WKBEAST_URL}/api/machine-data/push",
-            json={"api_key": API_KEY, "machines": machines, "farm": FARM_NAME},
-            timeout=15
-        )
-        data = resp.json()
-        if data.get("success"):
-            print(f"[SYNC] Pushed {data.get('synced', 0)} machines ({FARM_NAME})")
-        else:
-            print(f"[SYNC ERROR] {data.get('error', 'Unknown error')}")
-    except Exception as e:
-        print(f"[SYNC ERROR] Could not reach server: {e}")
+    """Push machine data in batches to avoid timeout"""
+    batch_size = 25
+    total_synced = 0
+    
+    for i in range(0, len(machines), batch_size):
+        batch = machines[i:i + batch_size]
+        try:
+            resp = requests.post(
+                f"{WKBEAST_URL}/api/machine-data/push",
+                json={"api_key": API_KEY, "machines": batch, "farm": FARM_NAME},
+                timeout=30
+            )
+            data = resp.json()
+            if data.get("success"):
+                total_synced += data.get("synced", 0)
+            else:
+                print(f"[SYNC ERROR] Batch {i//batch_size + 1}: {data.get('error', 'Unknown error')}")
+        except Exception as e:
+            print(f"[SYNC ERROR] Batch {i//batch_size + 1}: {e}")
+    
+    print(f"[SYNC] Pushed {total_synced} machines ({FARM_NAME})")
 
 
 def check_commands():
@@ -204,7 +211,7 @@ def check_commands():
         resp = requests.get(
             f"{WKBEAST_URL}/api/machine-data/commands",
             params={"api_key": API_KEY, "farm": FARM_NAME},
-            timeout=10
+            timeout=30
         )
         commands = resp.json()
         
