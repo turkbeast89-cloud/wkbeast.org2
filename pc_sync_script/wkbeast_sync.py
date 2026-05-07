@@ -212,27 +212,25 @@ def execute_command(cmd):
     
     try:
         if action == "reboot":
-            # Try HTTP reboot for Bitmain/Antminer (most common)
+            # Try Digest auth first (newer Bitmain firmware)
             try:
-                import urllib3
-                urllib3.disable_warnings()
-                r = requests.post(f"http://{ip}/cgi-bin/reboot.cgi", 
-                                auth=(MINER_USER, MINER_PASS), timeout=10)
-                result = f"HTTP reboot sent (status {r.status_code})"
-            except:
-                try:
-                    # Try digest auth (some firmware versions)
-                    from requests.auth import HTTPDigestAuth
+                from requests.auth import HTTPDigestAuth
+                r = requests.post(f"http://{ip}/cgi-bin/reboot.cgi",
+                                auth=HTTPDigestAuth(MINER_USER, MINER_PASS), timeout=10)
+                if r.status_code == 200:
+                    result = f"Rebooting {ip}!"
+                else:
+                    # Try Basic auth (older firmware)
                     r = requests.post(f"http://{ip}/cgi-bin/reboot.cgi",
-                                    auth=HTTPDigestAuth(MINER_USER, MINER_PASS), timeout=10)
-                    result = f"HTTP digest reboot sent (status {r.status_code})"
-                except:
-                    # Last resort: CGMiner API restart
-                    response = send_cgminer_command(ip, "restart")
-                    if response:
-                        result = "CGMiner restart command sent"
+                                    auth=(MINER_USER, MINER_PASS), timeout=10)
+                    if r.status_code == 200:
+                        result = f"Rebooting {ip}!"
                     else:
-                        result = "Failed - could not connect to miner"
+                        result = f"Failed - HTTP {r.status_code}"
+            except Exception as e:
+                # Last resort: CGMiner API
+                response = send_cgminer_command(ip, "restart")
+                result = "CGMiner restart sent" if response else f"Failed: {str(e)}"
             print(f"  -> {result}")
             
         elif action == "change_worker":
