@@ -3357,6 +3357,32 @@ async def _check_offline_and_alert():
     customer_accounts = await db.customer_accounts.find({}, {"_id": 0}).to_list(1000)
     customers = await db.customers.find({}, {"_id": 0}).to_list(1000)
     customer_map = {c["id"]: c for c in customers}
+    settings = await db.viabtc_settings.find_one({"id": "viabtc_settings"}, {"_id": 0})
+    main_watcher_key = settings.get("watcher_key") if settings else None
+    
+    # Collect all unique watcher keys to check
+    watcher_accounts = []
+    seen_keys = set()
+    
+    for acc in customer_accounts:
+        wk = acc.get("watcher_key")
+        if wk and wk not in seen_keys:
+            seen_keys.add(wk)
+            customer = customer_map.get(acc.get("customer_id"), {})
+            if customer.get("status") != "paused":
+                watcher_accounts.append({
+                    "watcher_key": wk,
+                    "worker_name": acc.get("worker_name", ""),
+                    "display_name": customer.get("name", acc.get("worker_name", ""))
+                })
+    
+    # Add main watcher key if not already included
+    if main_watcher_key and main_watcher_key not in seen_keys:
+        watcher_accounts.append({
+            "watcher_key": main_watcher_key,
+            "worker_name": "turkbeast",
+            "display_name": "turkbeast (Main)"
+        })
     
     # Build machine type lookup based on hashrate
     def detect_machine_type(hashrate_gh):
@@ -3374,13 +3400,9 @@ async def _check_offline_and_alert():
     offline_details = []
     
     async with aiohttp.ClientSession() as session:
-        for acc in customer_accounts:
-            watcher_key = acc.get("watcher_key")
-            if not watcher_key:
-                continue
-            customer = customer_map.get(acc.get("customer_id"), {})
-            if customer.get("status") == "paused":
-                continue
+        for acc in watcher_accounts:
+            watcher_key = acc["watcher_key"]
+            display_name = acc["display_name"]
             
             try:
                 url = f"https://www.viabtc.com/res/observer/worker?access_key={watcher_key}&coin=LTC"
@@ -3405,7 +3427,7 @@ async def _check_offline_and_alert():
                                 offline_details.append({
                                     "worker_id": worker_id,
                                     "name": wname,
-                                    "account": customer.get("name", acc.get("worker_name", "")),
+                                    "account": display_name,
                                     "machine_type": machine_type,
                                     "minutes_offline": offline_mins
                                 })
