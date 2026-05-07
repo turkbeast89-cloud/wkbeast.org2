@@ -1,5 +1,5 @@
-from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Request, Form
+from fastapi.responses import StreamingResponse, Response
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -382,6 +382,49 @@ async def update_payment(payment_id: str, data: PaymentUpdate):
     )
     if not result:
         raise HTTPException(status_code=404, detail="Payment not found")
+    
+    # Auto-send WhatsApp confirmation when marked as paid
+    if data.status == "paid":
+        try:
+            bot_settings = await db.bot_settings.find_one({"id": "bot_settings"}, {"_id": 0})
+            if bot_settings and bot_settings.get("auto_reminders_enabled"):
+                customer = await db.customers.find_one({"id": result.get("customer_id")}, {"_id": 0})
+                if customer and customer.get("phone") and customer.get("status") != "paused":
+                    phone_clean = format_phone_whatsapp(customer["phone"])
+                    settings = await db.settings.find_one({"id": "settings"}, {"_id": 0})
+                    team = settings.get("team_name", "WKBeast Team") if settings else "WKBeast Team"
+                    month = result.get("month", "")
+                    
+                    message = f"""✅ Payment Confirmed
+
+Dear {customer.get('name', 'Customer')},
+
+Thank you! We have reviewed and confirmed your payment for {month}.
+
+Your machines will continue to run without interruption. We appreciate your timely payment.
+
+Best regards,
+{team} 🐺💼
+
+━━━━━━━━━━━━━━━
+🤖 This is an automated message. Please do not reply to this number. For questions, contact us directly."""
+                    
+                    client_tw = get_twilio_client()
+                    if client_tw:
+                        client_tw.messages.create(body=message, from_=get_whatsapp_from(), to=f"whatsapp:{phone_clean}")
+                        await db.whatsapp_logs.insert_one({
+                            "customer_id": result.get("customer_id", ""),
+                            "customer_name": customer.get("name", ""),
+                            "phone": phone_clean,
+                            "message": message,
+                            "type": "payment_confirmed",
+                            "direction": "outbound",
+                            "status": "sent",
+                            "created_at": datetime.now(timezone.utc).isoformat()
+                        })
+        except:
+            pass  # Don't fail the payment update if WhatsApp fails
+    
     return result
 
 @api_router.post("/payments/bulk-status")
@@ -3406,6 +3449,104 @@ async def _check_offline_and_alert():
         "back_online": len(back_online),
         "messages_sent": messages_sent
     }
+
+
+# ==================== WHATSAPP WEBHOOK (Receive incoming messages) ====================
+
+@api_router.post("/whatsapp/webhook")
+async def whatsapp_webhook(request: Request):
+    """Receive incoming WhatsApp messages from Twilio webhook"""
+    form_data = await request.form()
+    
+    from_number = form_data.get("From", "").replace("whatsapp:", "")
+    body = form_data.get("Body", "")
+    message_sid = form_data.get("MessageSid", "")
+    
+    # Find customer by phone number
+    customers = await db.customers.find({}, {"_id": 0}).to_list(10000)
+    matched_customer = None
+    for c in customers:
+        customer_phone = format_phone_whatsapp(c.get("phone", ""))
+        if customer_phone == from_number:
+            matched_customer = c
+            break
+    
+    from datetime import datetime, timezone
+    
+    # Log the incoming message
+    await db.whatsapp_logs.insert_one({
+        "customer_id": matched_customer.get("id", "") if matched_customer else "",
+        "customer_name": matched_customer.get("name", "Unknown") if matched_customer else f"Unknown ({from_number})",
+        "phone": from_number,
+        "message": body,
+        "type": "incoming",
+        "direction": "inbound",
+        "status": "received",
+        "message_sid": message_sid,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    })
+    
+    # Return empty TwiML (no auto-reply)
+    return Response(content="<Response></Response>", media_type="application/xml")
+
+# ==================== PAYMENT CONFIRMATION NOTIFICATION ====================
+
+@api_router.post("/whatsapp/send-payment-confirmation")
+async def send_payment_confirmation(customer_id: str, month: str):
+    """Send payment confirmation message to customer"""
+    client_tw = get_twilio_client()
+    if not client_tw:
+        return {"success": False, "error": "Twilio not configured"}
+    
+    customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
+    if not customer:
+        return {"success": False, "error": "Customer not found"}
+    
+    phone = customer.get("phone", "")
+    if not phone:
+        return {"success": False, "error": "Customer has no phone number"}
+    
+    phone_clean = format_phone_whatsapp(phone)
+    settings = await db.settings.find_one({"id": "settings"}, {"_id": 0})
+    team = settings.get("team_name", "WKBeast Team") if settings else "WKBeast Team"
+    
+    message = f"""✅ Payment Confirmed
+
+Dear {customer.get('name', 'Customer')},
+
+Thank you! We have reviewed and confirmed your payment for {month}.
+
+Your machines will continue to run without interruption. We appreciate your timely payment.
+
+Best regards,
+{team} 🐺💼
+
+━━━━━━━━━━━━━━━
+🤖 This is an automated message. Please do not reply to this number. For questions, contact us directly."""
+    
+    from datetime import datetime, timezone
+    
+    try:
+        msg = client_tw.messages.create(
+            body=message,
+            from_=get_whatsapp_from(),
+            to=f"whatsapp:{phone_clean}"
+        )
+        # Log it
+        await db.whatsapp_logs.insert_one({
+            "customer_id": customer_id,
+            "customer_name": customer.get("name", ""),
+            "phone": phone_clean,
+            "message": message,
+            "type": "payment_confirmed",
+            "direction": "outbound",
+            "status": "sent",
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+        return {"success": True, "sid": msg.sid}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 
 
 # ==================== WHATSAPP MESSAGE HISTORY ====================
