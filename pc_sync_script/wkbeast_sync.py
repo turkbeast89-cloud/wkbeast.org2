@@ -266,9 +266,15 @@ def antminer_get_conf(ip, timeout=15):
         return None, None
 
 
-def antminer_set_conf(ip, conf, auth_name="Digest", timeout=15):
-    """POST miner config via Antminer web UI. Returns (ok, status_code, body)."""
+def antminer_set_conf(ip, conf, auth_name="Digest", timeout=60):
+    """POST miner config via Antminer web UI. Returns (ok, status_code, body, timed_out).
+
+    Antminer firmware applies the config synchronously (restarting cgminer) and may take
+    30-60 seconds to respond. Use a long timeout. If we still time out, the config may
+    have been saved anyway — caller should verify by re-reading.
+    """
     from requests.auth import HTTPDigestAuth, HTTPBasicAuth
+    from requests.exceptions import ReadTimeout, ConnectTimeout, Timeout
     auth = HTTPDigestAuth(MINER_USER, MINER_PASS) if auth_name == "Digest" else HTTPBasicAuth(MINER_USER, MINER_PASS)
     url = f"http://{ip}/cgi-bin/set_miner_conf.cgi"
 
@@ -276,7 +282,7 @@ def antminer_set_conf(ip, conf, auth_name="Digest", timeout=15):
     try:
         r = requests.post(url, auth=auth, json=conf, timeout=timeout)
         if r.status_code == 200:
-            return True, 200, r.text[:200]
+            return True, 200, r.text[:200], False
         if r.status_code != 401:
             # Try form-encoded as a fallback (very old firmware)
             form = {}
@@ -288,15 +294,26 @@ def antminer_set_conf(ip, conf, auth_name="Digest", timeout=15):
             for k, v in conf.items():
                 if k != "pools":
                     form[f"_ant_{k}"] = "true" if v is True else ("false" if v is False else v)
-            r2 = requests.post(url, auth=auth, data=form, timeout=timeout)
-            return (r2.status_code == 200), r2.status_code, r2.text[:200]
-        return False, r.status_code, r.text[:200]
+            try:
+                r2 = requests.post(url, auth=auth, data=form, timeout=timeout)
+                return (r2.status_code == 200), r2.status_code, r2.text[:200], False
+            except (ReadTimeout, ConnectTimeout, Timeout):
+                return False, 0, "form POST timed out", True
+        return False, r.status_code, r.text[:200], False
+    except (ReadTimeout, ConnectTimeout, Timeout) as e:
+        # Config probably WAS saved — the firmware just didn't reply because cgminer restarted.
+        return False, 0, f"POST timed out after {timeout}s (config may still be applied)", True
     except Exception as e:
-        return False, 0, str(e)
+        return False, 0, str(e), False
 
 
 def change_worker_via_http(ip, new_worker, pool_url=""):
-    """Update worker name on all pool entries via Antminer web UI (persistent)."""
+    """Update worker name on all pool entries via Antminer web UI (persistent).
+
+    Antminer's set_miner_conf.cgi often takes 30-60s to respond (it restarts cgminer
+    synchronously). Even if our POST times out, the config may already be saved.
+    So after POSTing we wait briefly and re-read the config to verify.
+    """
     conf, auth_name = antminer_get_conf(ip)
     if not conf or "pools" not in conf:
         return False, "Could not read miner config (firmware not Antminer-compatible?)"
@@ -314,11 +331,40 @@ def change_worker_via_http(ip, new_worker, pool_url=""):
         if not p.get("pass"):
             p["pass"] = "x"
 
-    print(f"  [HTTP] Updating {len(pools)} pool(s) on {ip} -> user={new_worker}")
-    ok, status, body = antminer_set_conf(ip, conf, auth_name=auth_name or "Digest")
+    print(f"  [HTTP] Updating {len(pools)} pool(s) on {ip} -> user={new_worker} (POST may take up to 60s)")
+    ok, status, body, timed_out = antminer_set_conf(ip, conf, auth_name=auth_name or "Digest", timeout=60)
+
     if ok:
-        return True, "Web UI accepted new config (HTTP 200)"
+        # Verify — sometimes firmware returns 200 but silently rejects the config
+        verified = _verify_worker_applied(ip, new_worker)
+        if verified:
+            return True, "Web UI accepted new config (verified)"
+        return False, "POST returned 200 but worker not applied on miner — firmware may be locked or pools field name differs"
+
+    if timed_out:
+        # Common case on stock Antminer: config WAS applied but cgminer restart ate the response.
+        # Wait for cgminer to come back up, then verify.
+        print(f"  [HTTP] POST timed out — waiting 20s for cgminer restart, then verifying...")
+        time.sleep(20)
+        verified = _verify_worker_applied(ip, new_worker)
+        if verified:
+            return True, "Web UI applied config (verified after timeout)"
+        return False, f"POST timed out and verification failed — worker still not changed"
+
     return False, f"Web UI rejected config (HTTP {status}): {body}"
+
+
+def _verify_worker_applied(ip, expected_worker, retries=3):
+    """Re-read miner config and check if the worker matches expected."""
+    for attempt in range(retries):
+        conf, _ = antminer_get_conf(ip, timeout=10)
+        if conf and "pools" in conf:
+            pools = conf.get("pools", [])
+            if pools and any(p.get("user", "").strip() == expected_worker for p in pools):
+                return True
+        if attempt < retries - 1:
+            time.sleep(5)
+    return False
 
 
 def change_worker_via_cgminer(ip, new_worker, pool_url=""):
