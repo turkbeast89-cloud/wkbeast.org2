@@ -3119,7 +3119,7 @@ async def notify_offline_machines(admin_phone: str = "+9613022005"):
         hrs = m["minutes_offline"] // 60
         mins = m["minutes_offline"] % 60
         time_str = f"{hrs}h {mins}m" if hrs > 0 else f"{mins}m"
-        details += f"❌ {m['name']} ({m['account']}) [{m.get('machine_type', 'Unknown')}] - offline {time_str}\n"
+        details += f"❌ {m['name']} ({m['account']}) - offline {time_str}\n"
     
     try:
         phone = admin_phone if admin_phone.startswith("+") else "+" + admin_phone
@@ -3465,7 +3465,7 @@ async def _check_offline_and_alert(force_send=False):
         for worker_id in newly_offline:
             detail = next((d for d in offline_details if d["worker_id"] == worker_id), None)
             if detail:
-                details += f"❌ {detail['name']} ({detail['account']}) [{detail.get('machine_type', 'Unknown')}]\n"
+                details += f"❌ {detail['name']} ({detail['account']})\n"
             else:
                 details += f"❌ {worker_id}\n"
         
