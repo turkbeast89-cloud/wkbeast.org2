@@ -66,7 +66,7 @@ const Dashboard = () => {
 
   const fetchLiveMachines = async () => {
     try {
-      const res = await axios.get(`${API}/machine-data/live`);
+      const res = await axios.get(`${API}/machine-data/live?filter_customers=false`);
       setLiveMachines(res.data);
     } catch (e) {}
   };

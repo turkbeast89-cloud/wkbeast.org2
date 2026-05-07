@@ -544,9 +544,12 @@ async def push_machine_data(data: dict):
     return {"success": True, "synced": len(machines)}
 
 @api_router.get("/machine-data/live")
-async def get_live_machine_data():
-    """Get live machine data - only machines that match a customer's worker name"""
+async def get_live_machine_data(filter_customers: bool = True):
+    """Get live machine data. filter_customers=true shows only customer machines, false shows all."""
     machines = await db.machine_live_data.find({}, {"_id": 0}).to_list(10000)
+    
+    if not filter_customers:
+        return machines
     
     # Get all customer worker names
     accounts = await db.customer_accounts.find({}, {"_id": 0, "worker_name": 1}).to_list(10000)
@@ -562,7 +565,6 @@ async def get_live_machine_data():
         worker = m.get("worker_name", "").lower().strip()
         if not worker:
             continue
-        # Check if any customer worker name is in this machine's worker name
         for cw in customer_workers:
             if cw in worker or worker in cw:
                 filtered.append(m)
