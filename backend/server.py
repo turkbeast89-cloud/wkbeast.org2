@@ -517,31 +517,47 @@ async def push_machine_data(data: dict):
     if not machines:
         return {"success": False, "error": "No machine data"}
     
-    # Store each machine's data
+    # Get list of deleted/hidden IPs (don't re-add them)
+    hidden = await db.machine_hidden.find({}, {"_id": 0}).to_list(10000)
+    hidden_ips = set(h.get("ip", "") for h in hidden)
+    
+    synced = 0
     for m in machines:
         ip = m.get("ip", "")
-        if not ip:
+        if not ip or ip in hidden_ips:
             continue
+        
+        # Check if this machine was manually renamed — don't overwrite the name
+        existing = await db.machine_live_data.find_one({"ip": ip}, {"_id": 0})
+        
+        update_data = {
+            "ip": ip,
+            "hashrate": m.get("hashrate", 0),
+            "temperature": m.get("temperature", 0),
+            "fan_speed": m.get("fan_speed", 0),
+            "power": m.get("power", 0),
+            "status": m.get("status", "online"),
+            "uptime": m.get("uptime", ""),
+            "pool": m.get("pool", ""),
+            "farm": m.get("farm", farm),
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }
+        
+        # Only set worker_name and model if not manually renamed
+        if existing and existing.get("manually_renamed"):
+            pass  # Keep the manual name
+        else:
+            update_data["worker_name"] = m.get("worker_name", "")
+            update_data["model"] = m.get("model", "")
+        
         await db.machine_live_data.update_one(
             {"ip": ip},
-            {"$set": {
-                "ip": ip,
-                "worker_name": m.get("worker_name", ""),
-                "hashrate": m.get("hashrate", 0),
-                "temperature": m.get("temperature", 0),
-                "fan_speed": m.get("fan_speed", 0),
-                "power": m.get("power", 0),
-                "status": m.get("status", "online"),
-                "model": m.get("model", ""),
-                "uptime": m.get("uptime", ""),
-                "pool": m.get("pool", ""),
-                "farm": m.get("farm", farm),
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            }},
+            {"$set": update_data},
             upsert=True
         )
+        synced += 1
     
-    return {"success": True, "synced": len(machines)}
+    return {"success": True, "synced": synced}
 
 @api_router.get("/machine-data/live")
 async def get_live_machine_data(filter_customers: bool = True):
@@ -632,17 +648,17 @@ async def rename_machine(data: dict):
     if not ip or not new_name:
         raise HTTPException(status_code=400, detail="IP and worker_name required")
     
-    result = await db.machine_live_data.update_one({"ip": ip}, {"$set": {"worker_name": new_name}})
+    result = await db.machine_live_data.update_one({"ip": ip}, {"$set": {"worker_name": new_name, "manually_renamed": True}})
     if result.modified_count == 0:
         raise HTTPException(status_code=404, detail="Machine not found")
     return {"success": True}
 
 @api_router.delete("/machine-data/{ip}")
 async def delete_machine(ip: str):
-    """Remove a machine from live data"""
-    result = await db.machine_live_data.delete_one({"ip": ip})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Machine not found")
+    """Remove a machine from live data and prevent it from coming back"""
+    await db.machine_live_data.delete_one({"ip": ip})
+    # Add to hidden list so sync doesn't re-add it
+    await db.machine_hidden.update_one({"ip": ip}, {"$set": {"ip": ip, "hidden_at": datetime.now(timezone.utc).isoformat()}}, upsert=True)
     return {"success": True}
 
 
