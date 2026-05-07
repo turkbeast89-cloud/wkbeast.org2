@@ -567,6 +567,26 @@ const AdminPanel = () => {
                     )}
                   </td>
                   <td className="py-3 px-4 text-right">
+                    <button
+                      onClick={async () => {
+                        const cust = customers.find(c => c.id === account.customer_id);
+                        if (!cust) return;
+                        try {
+                          const res = await axios.put(`${API}/customers/${account.customer_id}/whatsapp-toggle`);
+                          toast.success(`WhatsApp ${res.data.whatsapp_enabled ? 'ON' : 'OFF'} for ${res.data.name}`);
+                          fetchData();
+                        } catch (e) { toast.error("Failed"); }
+                      }}
+                      className={`w-8 h-4 rounded-full relative inline-block mr-2 transition-colors ${
+                        (customers.find(c => c.id === account.customer_id)?.whatsapp_enabled !== false) ? 'bg-[#25D366]' : 'bg-[#27272A]'
+                      }`}
+                      title={`WhatsApp ${(customers.find(c => c.id === account.customer_id)?.whatsapp_enabled !== false) ? 'ON' : 'OFF'}`}
+                      data-testid={`wa-toggle-${account.worker_name}`}
+                    >
+                      <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${
+                        (customers.find(c => c.id === account.customer_id)?.whatsapp_enabled !== false) ? 'left-4' : 'left-0.5'
+                      }`} />
+                    </button>
                     <Button size="icon" variant="ghost" onClick={() => { 
                       setEditingAccount(account); 
                       setAccountForm({

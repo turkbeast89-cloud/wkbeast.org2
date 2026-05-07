@@ -67,6 +67,7 @@ class Customer(BaseModel):
     total_fee: float = 0   # What customer pays
     status: str = "active"  # active, paused
     prepaid_months: int = 0  # Months paid in advance
+    whatsapp_enabled: bool = True  # Whether this customer receives WhatsApp messages
     notes: str = ""
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -2935,6 +2936,9 @@ async def send_payment_reminders(month: str):
             skipped.append({"name": customer["name"], "reason": "Paused"})
             continue
         
+        if not customer.get("whatsapp_enabled", True):
+            skipped.append({"name": customer["name"], "reason": "WhatsApp disabled"})
+            continue
         phone = customer.get("phone", "")
         if not phone:
             skipped.append({"name": customer["name"], "reason": "No phone number"})
@@ -3180,6 +3184,20 @@ async def update_bot_settings(data: dict):
     return result
 
 @api_router.post("/bot/run-reminder-check")
+
+@api_router.put("/customers/{customer_id}/whatsapp-toggle")
+async def toggle_customer_whatsapp(customer_id: str):
+    """Toggle WhatsApp notifications for a specific customer"""
+    customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    
+    current = customer.get("whatsapp_enabled", True)
+    new_val = not current
+    await db.customers.update_one({"id": customer_id}, {"$set": {"whatsapp_enabled": new_val}})
+    return {"success": True, "whatsapp_enabled": new_val, "name": customer.get("name")}
+
+
 async def run_reminder_check():
     """Manually trigger a payment reminder check (also runs automatically)"""
     bot_settings = await db.bot_settings.find_one({"id": "bot_settings"}, {"_id": 0})
@@ -3240,6 +3258,8 @@ async def _send_auto_reminders():
         all_customers = await db.customers.find({}, {"_id": 0}).to_list(10000)
         for customer in all_customers:
             if customer.get("status") == "paused":
+                continue
+            if not customer.get("whatsapp_enabled", True):
                 continue
             remaining = customer.get("prepaid_months", 0)
             # Customer just used a prepaid month (we decremented above), so add 1 back to show original
@@ -3329,6 +3349,9 @@ Thank you for being ahead!
     for payment in payments:
         customer = customer_map.get(payment.get("customer_id"))
         if not customer or customer.get("status") == "paused":
+            continue
+        
+        if not customer.get("whatsapp_enabled", True):
             continue
         
         phone = customer.get("phone", "")
@@ -3690,6 +3713,9 @@ async def broadcast_whatsapp(data: dict):
     for customer in customers:
         phone = customer.get("phone", "")
         if not phone:
+            continue
+        
+        if not customer.get("whatsapp_enabled", True):
             continue
         
         phone_clean = format_phone_whatsapp(phone)
