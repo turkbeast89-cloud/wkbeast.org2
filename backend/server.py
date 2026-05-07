@@ -3190,12 +3190,12 @@ async def run_reminder_check():
 
 @api_router.post("/bot/run-offline-check")
 async def run_offline_check():
-    """Manually trigger an offline machine check (also runs automatically)"""
+    """Manually trigger an offline machine check — ALWAYS sends alert"""
     bot_settings = await db.bot_settings.find_one({"id": "bot_settings"}, {"_id": 0})
     if not bot_settings or not bot_settings.get("offline_alerts_enabled"):
         return {"success": False, "message": "Offline alerts are disabled"}
     
-    return await _check_offline_and_alert()
+    return await _check_offline_and_alert(force_send=True)
 
 async def _send_auto_reminders():
     """Internal: Send payment reminders with escalating urgency based on day of month"""
@@ -3349,8 +3349,8 @@ If you have already paid, please ignore this message.
     
     return {"success": True, "sent": sent, "failed": failed, "month": current_month, "message_type": message_type}
 
-async def _check_offline_and_alert():
-    """Internal: Check for offline machines and alert admin"""
+async def _check_offline_and_alert(force_send=False):
+    """Internal: Check for offline machines and alert admin. force_send=True always sends alert."""
     import aiohttp
     from datetime import datetime, timezone
     
@@ -3447,8 +3447,14 @@ async def _check_offline_and_alert():
                 pass
     
     # Determine newly offline and newly back online
-    newly_offline = current_offline - known_offline
-    back_online = known_offline - current_offline
+    if force_send:
+        # Manual check: always report ALL offline machines
+        newly_offline = current_offline
+        back_online = set()
+    else:
+        # Auto check: only report changes
+        newly_offline = current_offline - known_offline
+        back_online = known_offline - current_offline
     
     messages_sent = []
     template_sid = os.environ.get("TWILIO_TEMPLATE_OFFLINE", "")
