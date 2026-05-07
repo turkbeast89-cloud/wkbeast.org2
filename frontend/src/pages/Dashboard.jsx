@@ -26,6 +26,7 @@ const Dashboard = () => {
   const [overdueData, setOverdueData] = useState(null);
   const [liveMachines, setLiveMachines] = useState([]);
   const [liveMachinesLoading, setLiveMachinesLoading] = useState(false);
+  const [liveFilter, setLiveFilter] = useState("customers");
 
   // Helper to format hashrate
   const formatHashrate = (hashrate, coin) => {
@@ -55,7 +56,7 @@ const Dashboard = () => {
     const interval = setInterval(fetchMachineMonitor, 60000);
     const interval2 = setInterval(fetchLiveMachines, 120000);
     return () => { clearInterval(interval); clearInterval(interval2); };
-  }, [monitorMode]);
+  }, [monitorMode, liveFilter]);
 
   const fetchOverdue = async () => {
     try {
@@ -66,7 +67,8 @@ const Dashboard = () => {
 
   const fetchLiveMachines = async () => {
     try {
-      const res = await axios.get(`${API}/machine-data/live?filter_customers=true`);
+      const filter = liveFilter === "customers" ? "true" : "false";
+      const res = await axios.get(`${API}/machine-data/live?filter_customers=${filter}`);
       setLiveMachines(res.data);
     } catch (e) {}
   };
@@ -701,16 +703,38 @@ const Dashboard = () => {
                 </p>
               </div>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => { setLiveMachinesLoading(true); fetchLiveMachines().finally(() => setLiveMachinesLoading(false)); }}
-              className="border-[#27272A] hover:bg-[#27272A]"
-              data-testid="refresh-live-machines"
-            >
-              <RefreshCw size={14} className={`mr-2 ${liveMachinesLoading ? 'animate-spin' : ''}`} />
-              Refresh
-            </Button>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center bg-[#1A1A1A] border border-[#27272A] rounded-lg overflow-hidden">
+                <button
+                  onClick={() => setLiveFilter("customers")}
+                  className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                    liveFilter === "customers" ? "bg-cyan-500 text-black" : "text-gray-400 hover:text-white"
+                  }`}
+                  data-testid="live-filter-customers"
+                >
+                  My Customers
+                </button>
+                <button
+                  onClick={() => setLiveFilter("all")}
+                  className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                    liveFilter === "all" ? "bg-cyan-500 text-black" : "text-gray-400 hover:text-white"
+                  }`}
+                  data-testid="live-filter-all"
+                >
+                  All
+                </button>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { setLiveMachinesLoading(true); fetchLiveMachines().finally(() => setLiveMachinesLoading(false)); }}
+                className="border-[#27272A] hover:bg-[#27272A]"
+                data-testid="refresh-live-machines"
+              >
+                <RefreshCw size={14} className={`mr-2 ${liveMachinesLoading ? 'animate-spin' : ''}`} />
+                Refresh
+              </Button>
+            </div>
           </div>
 
           {/* Stats summary */}
@@ -788,21 +812,41 @@ const Dashboard = () => {
                         <td className="py-2 px-3 text-gray-400 font-mono text-xs">{m.power > 0 ? `${m.power}W` : '—'}</td>
                         <td className="py-2 px-3 text-gray-500 text-xs">{m.uptime || '—'}</td>
                         <td className="py-2 px-3 text-right">
-                          <button
-                            onClick={async () => {
-                              if (!window.confirm(`Reboot machine at ${m.ip}?`)) return;
-                              try {
-                                const res = await axios.post(`${API}/machine-data/command`, { ip: m.ip, action: 'reboot' });
-                                if (res.data.success) toast.success(`Reboot command queued for ${m.ip}`);
-                                else toast.error('Failed to queue command');
-                              } catch (e) { toast.error('Failed'); }
-                            }}
-                            className="text-xs bg-red-500/10 text-red-400 hover:bg-red-500/20 px-2 py-1 rounded transition-colors"
-                            data-testid={`reboot-${m.ip}`}
-                          >
-                            <RotateCcw size={12} className="inline mr-1" />
-                            Reboot
-                          </button>
+                          <div className="flex items-center gap-1 justify-end">
+                            {liveFilter === "all" && (
+                              <button
+                                onClick={async () => {
+                                  const name = m.worker_name || m.ip;
+                                  if (!window.confirm(`Add "${name}" as a temporary customer?`)) return;
+                                  try {
+                                    await axios.post(`${API}/customers`, { name: name, phone: "", machines: [], total_cost: 0, total_fee: 0, status: "active", notes: "Whitelisted from Live Panel" });
+                                    await axios.post(`${API}/customer-accounts`, { customer_name: name, username: name.toLowerCase(), password: "0000", worker_name: m.worker_name || "" });
+                                    toast.success(`${name} added as customer!`);
+                                    fetchLiveMachines();
+                                  } catch (e) { toast.error("Failed to add"); }
+                                }}
+                                className="text-xs bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20 px-2 py-1 rounded transition-colors"
+                                data-testid={`whitelist-${m.ip}`}
+                              >
+                                + Whitelist
+                              </button>
+                            )}
+                            <button
+                              onClick={async () => {
+                                if (!window.confirm(`Reboot machine at ${m.ip}?`)) return;
+                                try {
+                                  const res = await axios.post(`${API}/machine-data/command`, { ip: m.ip, action: 'reboot' });
+                                  if (res.data.success) toast.success(`Reboot command queued for ${m.ip}`);
+                                  else toast.error('Failed to queue command');
+                                } catch (e) { toast.error('Failed'); }
+                              }}
+                              className="text-xs bg-red-500/10 text-red-400 hover:bg-red-500/20 px-2 py-1 rounded transition-colors"
+                              data-testid={`reboot-${m.ip}`}
+                            >
+                              <RotateCcw size={12} className="inline mr-1" />
+                              Reboot
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
