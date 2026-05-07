@@ -2812,6 +2812,258 @@ async def get_machine_monitor(force_refresh: bool = False, mode: str = "api"):
     
     return result
 
+# ==================== WHATSAPP BOT (Twilio) ====================
+
+from twilio.rest import Client as TwilioClient
+
+def get_twilio_client():
+    sid = os.environ.get("TWILIO_ACCOUNT_SID", "")
+    token = os.environ.get("TWILIO_AUTH_TOKEN", "")
+    if not sid or not token:
+        return None
+    return TwilioClient(sid, token)
+
+def get_whatsapp_from():
+    num = os.environ.get("TWILIO_WHATSAPP_NUMBER", "")
+    return f"whatsapp:{num}" if num else ""
+
+@api_router.post("/whatsapp/send")
+async def send_whatsapp_message(to: str, message: str):
+    """Send a WhatsApp message to a customer"""
+    client = get_twilio_client()
+    if not client:
+        return {"success": False, "error": "Twilio not configured"}
+    
+    # Format phone number
+    phone = to.replace(" ", "").replace("-", "")
+    if not phone.startswith("+"):
+        if phone.startswith("961"):
+            phone = "+" + phone
+        elif phone.startswith("0"):
+            phone = "+961" + phone[1:]
+        else:
+            phone = "+961" + phone
+    
+    try:
+        msg = client.messages.create(
+            body=message,
+            from_=get_whatsapp_from(),
+            to=f"whatsapp:{phone}"
+        )
+        return {"success": True, "sid": msg.sid, "status": msg.status}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@api_router.post("/whatsapp/send-payment-reminders")
+async def send_payment_reminders(month: str):
+    """Send payment reminders to all unpaid customers for a given month via WhatsApp"""
+    client = get_twilio_client()
+    if not client:
+        return {"success": False, "error": "Twilio not configured"}
+    
+    # Get settings for message template
+    settings = await db.settings.find_one({"id": "settings"}, {"_id": 0})
+    if not settings:
+        return {"success": False, "error": "Settings not configured"}
+    
+    # Get unpaid payments for the month
+    payments = await db.payments.find({"month": month, "status": "unpaid"}, {"_id": 0}).to_list(10000)
+    customers = await db.customers.find({}, {"_id": 0}).to_list(10000)
+    customer_map = {c["id"]: c for c in customers}
+    
+    sent = []
+    failed = []
+    skipped = []
+    
+    for payment in payments:
+        customer = customer_map.get(payment.get("customer_id"))
+        if not customer:
+            skipped.append({"name": payment.get("customer_name", "Unknown"), "reason": "Customer not found"})
+            continue
+        
+        if customer.get("status") == "paused":
+            skipped.append({"name": customer["name"], "reason": "Paused"})
+            continue
+        
+        phone = customer.get("phone", "")
+        if not phone:
+            skipped.append({"name": customer["name"], "reason": "No phone number"})
+            continue
+        
+        # Format phone
+        phone_clean = phone.replace(" ", "").replace("-", "")
+        if not phone_clean.startswith("+"):
+            if phone_clean.startswith("961"):
+                phone_clean = "+" + phone_clean
+            elif phone_clean.startswith("0"):
+                phone_clean = "+961" + phone_clean[1:]
+            else:
+                phone_clean = "+961" + phone_clean
+        
+        # Format message from template
+        import urllib.parse
+        message = settings.get("message_template", "Payment reminder: ${amount} for {month}").format(
+            month=month,
+            amount=payment.get("amount", 0),
+            whish=settings.get("whish_number", ""),
+            usdt=settings.get("usdt_address", ""),
+            team=settings.get("team_name", "WKBeast")
+        )
+        
+        try:
+            msg = client.messages.create(
+                body=message,
+                from_=get_whatsapp_from(),
+                to=f"whatsapp:{phone_clean}"
+            )
+            sent.append({"name": customer["name"], "phone": phone, "sid": msg.sid})
+        except Exception as e:
+            failed.append({"name": customer["name"], "phone": phone, "error": str(e)})
+    
+    return {
+        "success": True,
+        "sent": len(sent),
+        "failed": len(failed),
+        "skipped": len(skipped),
+        "details": {"sent": sent, "failed": failed, "skipped": skipped}
+    }
+
+@api_router.post("/whatsapp/send-single-reminder")
+async def send_single_reminder(customer_id: str, month: str):
+    """Send payment reminder to a single customer"""
+    client = get_twilio_client()
+    if not client:
+        return {"success": False, "error": "Twilio not configured"}
+    
+    customer = await db.customers.find_one({"id": customer_id}, {"_id": 0})
+    if not customer:
+        return {"success": False, "error": "Customer not found"}
+    
+    payment = await db.payments.find_one({"customer_id": customer_id, "month": month}, {"_id": 0})
+    if not payment:
+        return {"success": False, "error": "No payment found for this month"}
+    
+    settings = await db.settings.find_one({"id": "settings"}, {"_id": 0})
+    
+    phone = customer.get("phone", "")
+    if not phone:
+        return {"success": False, "error": "Customer has no phone number"}
+    
+    phone_clean = phone.replace(" ", "").replace("-", "")
+    if not phone_clean.startswith("+"):
+        if phone_clean.startswith("961"):
+            phone_clean = "+" + phone_clean
+        elif phone_clean.startswith("0"):
+            phone_clean = "+961" + phone_clean[1:]
+        else:
+            phone_clean = "+961" + phone_clean
+    
+    message = settings.get("message_template", "Payment reminder: ${amount} for {month}").format(
+        month=month,
+        amount=payment.get("amount", 0),
+        whish=settings.get("whish_number", ""),
+        usdt=settings.get("usdt_address", ""),
+        team=settings.get("team_name", "WKBeast")
+    )
+    
+    try:
+        msg = client.messages.create(
+            body=message,
+            from_=get_whatsapp_from(),
+            to=f"whatsapp:{phone_clean}"
+        )
+        return {"success": True, "sid": msg.sid, "status": msg.status, "to": phone_clean}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@api_router.post("/whatsapp/test-send")
+async def test_whatsapp_send(to: str):
+    """Test WhatsApp connection by sending a test message"""
+    client = get_twilio_client()
+    if not client:
+        return {"success": False, "error": "Twilio credentials not configured. Add TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN to .env"}
+    
+    phone = to.replace(" ", "").replace("-", "")
+    if not phone.startswith("+"):
+        phone = "+" + phone
+    
+    try:
+        msg = client.messages.create(
+            body="WKBeast Mining Farm Bot connected! You will receive payment reminders and machine status alerts here.",
+            from_=get_whatsapp_from(),
+            to=f"whatsapp:{phone}"
+        )
+        return {"success": True, "sid": msg.sid, "status": msg.status, "message": f"Test message sent to {phone}"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@api_router.post("/whatsapp/notify-offline")
+async def notify_offline_machines(admin_phone: str = "+905464678877"):
+    """Check for offline machines and send WhatsApp alert to admin"""
+    client = get_twilio_client()
+    if not client:
+        return {"success": False, "error": "Twilio not configured"}
+    
+    # Fetch current machine status
+    import aiohttp
+    customer_accounts = await db.customer_accounts.find({}, {"_id": 0}).to_list(1000)
+    customers = await db.customers.find({}, {"_id": 0}).to_list(1000)
+    customer_map = {c["id"]: c for c in customers}
+    
+    offline_machines = []
+    
+    for acc in customer_accounts:
+        watcher_key = acc.get("watcher_key")
+        if not watcher_key:
+            continue
+        customer = customer_map.get(acc.get("customer_id"), {})
+        if customer.get("status") == "paused":
+            continue
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"https://www.viabtc.com/res/observer/worker?access_key={watcher_key}&coin=LTC"
+                async with session.get(url, timeout=10) as resp:
+                    data = await resp.json()
+                    if data.get("code") == 0:
+                        for w in data.get("data", {}).get("data", []):
+                            status = w.get("worker_status", w.get("status", ""))
+                            if status in ["offline", "unactive"]:
+                                last_active = w.get("last_active", 0)
+                                import time as t
+                                offline_mins = int((t.time() - last_active) / 60) if last_active else 0
+                                offline_machines.append({
+                                    "name": w.get("worker_name", w.get("name", "")),
+                                    "account": customer.get("name", acc.get("worker_name", "")),
+                                    "minutes_offline": offline_mins
+                                })
+        except:
+            pass
+    
+    if not offline_machines:
+        return {"success": True, "message": "All machines online! No alert needed.", "offline": 0}
+    
+    # Build alert message
+    alert = f"⚠️ WKBeast Alert: {len(offline_machines)} machine(s) OFFLINE\n\n"
+    for m in offline_machines:
+        hrs = m["minutes_offline"] // 60
+        mins = m["minutes_offline"] % 60
+        time_str = f"{hrs}h {mins}m" if hrs > 0 else f"{mins}m"
+        alert += f"❌ {m['name']} ({m['account']}) - offline {time_str}\n"
+    
+    try:
+        phone = admin_phone if admin_phone.startswith("+") else "+" + admin_phone
+        msg = client.messages.create(
+            body=alert,
+            from_=get_whatsapp_from(),
+            to=f"whatsapp:{phone}"
+        )
+        return {"success": True, "sid": msg.sid, "offline": len(offline_machines), "machines": offline_machines}
+    except Exception as e:
+        return {"success": False, "error": str(e), "offline": len(offline_machines), "machines": offline_machines}
+
+
+
 # Include the router
 app.include_router(api_router)
 
