@@ -623,6 +623,29 @@ async def complete_command(data: dict):
             "completed_at": datetime.now(timezone.utc).isoformat()
         }}
     )
+
+@api_router.post("/machine-data/rename")
+async def rename_machine(data: dict):
+    """Rename a machine's worker name"""
+    ip = data.get("ip", "")
+    new_name = data.get("worker_name", "")
+    if not ip or not new_name:
+        raise HTTPException(status_code=400, detail="IP and worker_name required")
+    
+    result = await db.machine_live_data.update_one({"ip": ip}, {"$set": {"worker_name": new_name}})
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Machine not found")
+    return {"success": True}
+
+@api_router.delete("/machine-data/{ip}")
+async def delete_machine(ip: str):
+    """Remove a machine from live data"""
+    result = await db.machine_live_data.delete_one({"ip": ip})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Machine not found")
+    return {"success": True}
+
+
     return {"success": True}
 
 

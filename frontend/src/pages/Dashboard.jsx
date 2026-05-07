@@ -800,7 +800,20 @@ const Dashboard = () => {
                           </span>
                         </td>
                         <td className="py-2 px-3 font-mono text-xs text-gray-300">{m.ip}</td>
-                        <td className="py-2 px-3 text-white font-medium text-xs">{m.worker_name || '—'}</td>
+                        <td className="py-2 px-3 text-white font-medium text-xs">
+                          <span
+                            className="cursor-pointer hover:text-cyan-400 transition-colors"
+                            onClick={() => {
+                              const newName = window.prompt("Rename worker:", m.worker_name || "");
+                              if (newName && newName !== m.worker_name) {
+                                axios.post(`${API}/machine-data/rename`, { ip: m.ip, worker_name: newName })
+                                  .then(() => { toast.success(`Renamed to ${newName}`); fetchLiveMachines(); })
+                                  .catch(() => toast.error("Failed to rename"));
+                              }
+                            }}
+                            title="Click to rename"
+                          >{m.worker_name || '—'}</span>
+                        </td>
                         <td className="py-2 px-3 text-gray-400 text-xs">{m.model || '—'}</td>
                         <td className="py-2 px-3 text-purple-400 text-xs">{m.farm || '—'}</td>
                         <td className="py-2 px-3 text-cyan-400 font-mono text-xs">{m.hashrate ? `${m.hashrate.toFixed(1)} GH/s` : '—'}</td>
@@ -814,6 +827,7 @@ const Dashboard = () => {
                         <td className="py-2 px-3 text-right">
                           <div className="flex items-center gap-1 justify-end">
                             {liveFilter === "all" && (
+                              <>
                               <button
                                 onClick={async () => {
                                   const name = m.worker_name || m.ip;
@@ -831,6 +845,21 @@ const Dashboard = () => {
                               >
                                 + Whitelist
                               </button>
+                              <button
+                                onClick={async () => {
+                                  if (!window.confirm(`Remove ${m.worker_name || m.ip} from machine list?`)) return;
+                                  try {
+                                    await axios.delete(`${API}/machine-data/${encodeURIComponent(m.ip)}`);
+                                    toast.success("Machine removed");
+                                    fetchLiveMachines();
+                                  } catch (e) { toast.error("Failed"); }
+                                }}
+                                className="text-xs bg-gray-500/10 text-gray-400 hover:bg-red-500/20 hover:text-red-400 px-2 py-1 rounded transition-colors"
+                                data-testid={`delete-machine-${m.ip}`}
+                              >
+                                Remove
+                              </button>
+                              </>
                             )}
                             <button
                               onClick={async () => {
