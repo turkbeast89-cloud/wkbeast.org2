@@ -2981,11 +2981,22 @@ async def test_whatsapp_send(to: str):
         phone = "+" + phone
     
     try:
-        msg = client.messages.create(
-            body="WKBeast Mining Farm Bot connected! You will receive payment reminders and machine status alerts here.",
-            from_=get_whatsapp_from(),
-            to=f"whatsapp:{phone}"
-        )
+        # Use offline alert template for test (it's approved for business-initiated)
+        template_sid = os.environ.get("TWILIO_TEMPLATE_OFFLINE", "")
+        if template_sid:
+            import json
+            msg = client.messages.create(
+                content_sid=template_sid,
+                content_variables=json.dumps({"1": "0", "2": "All machines online. Bot connected successfully!"}),
+                from_=get_whatsapp_from(),
+                to=f"whatsapp:{phone}"
+            )
+        else:
+            msg = client.messages.create(
+                body="WKBeast Mining Farm Bot connected!",
+                from_=get_whatsapp_from(),
+                to=f"whatsapp:{phone}"
+            )
         return {"success": True, "sid": msg.sid, "status": msg.status, "message": f"Test message sent to {phone}"}
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -3036,21 +3047,31 @@ async def notify_offline_machines(admin_phone: str = "+9613022005"):
     if not offline_machines:
         return {"success": True, "message": "All machines online! No alert needed.", "offline": 0}
     
-    # Build alert message
-    alert = f"⚠️ WKBeast Alert: {len(offline_machines)} machine(s) OFFLINE\n\n"
+    # Build alert details
+    details = ""
     for m in offline_machines:
         hrs = m["minutes_offline"] // 60
         mins = m["minutes_offline"] % 60
         time_str = f"{hrs}h {mins}m" if hrs > 0 else f"{mins}m"
-        alert += f"❌ {m['name']} ({m['account']}) - offline {time_str}\n"
+        details += f"❌ {m['name']} ({m['account']}) - offline {time_str}\n"
     
     try:
         phone = admin_phone if admin_phone.startswith("+") else "+" + admin_phone
-        msg = client.messages.create(
-            body=alert,
-            from_=get_whatsapp_from(),
-            to=f"whatsapp:{phone}"
-        )
+        template_sid = os.environ.get("TWILIO_TEMPLATE_OFFLINE", "")
+        if template_sid:
+            import json
+            msg = client.messages.create(
+                content_sid=template_sid,
+                content_variables=json.dumps({"1": str(len(offline_machines)), "2": details.strip()}),
+                from_=get_whatsapp_from(),
+                to=f"whatsapp:{phone}"
+            )
+        else:
+            msg = client.messages.create(
+                body=f"⚠️ WKBeast Alert: {len(offline_machines)} machine(s) OFFLINE\n\n{details}",
+                from_=get_whatsapp_from(),
+                to=f"whatsapp:{phone}"
+            )
         return {"success": True, "sid": msg.sid, "offline": len(offline_machines), "machines": offline_machines}
     except Exception as e:
         return {"success": False, "error": str(e), "offline": len(offline_machines), "machines": offline_machines}
@@ -3143,20 +3164,35 @@ async def _send_auto_reminders():
         
         phone_clean = format_phone_whatsapp(phone)
         
-        message = settings.get("message_template", "Payment reminder: ${amount} for {month}").format(
-            month=current_month,
-            amount=payment.get("amount", 0),
-            whish=settings.get("whish_number", ""),
-            usdt=settings.get("usdt_address", ""),
-            team=settings.get("team_name", "WKBeast")
-        )
-        
         try:
-            client_tw.messages.create(
-                body=message,
-                from_=get_whatsapp_from(),
-                to=f"whatsapp:{phone_clean}"
-            )
+            payment_template_sid = os.environ.get("TWILIO_TEMPLATE_PAYMENT", "")
+            if payment_template_sid:
+                import json
+                client_tw.messages.create(
+                    content_sid=payment_template_sid,
+                    content_variables=json.dumps({
+                        "1": current_month,
+                        "2": str(payment.get("amount", 0)),
+                        "3": settings.get("whish_number", ""),
+                        "4": settings.get("usdt_address", ""),
+                        "5": settings.get("team_name", "WKBeast")
+                    }),
+                    from_=get_whatsapp_from(),
+                    to=f"whatsapp:{phone_clean}"
+                )
+            else:
+                message = settings.get("message_template", "Payment reminder: ${amount} for {month}").format(
+                    month=current_month,
+                    amount=payment.get("amount", 0),
+                    whish=settings.get("whish_number", ""),
+                    usdt=settings.get("usdt_address", ""),
+                    team=settings.get("team_name", "WKBeast")
+                )
+                client_tw.messages.create(
+                    body=message,
+                    from_=get_whatsapp_from(),
+                    to=f"whatsapp:{phone_clean}"
+                )
             sent += 1
         except:
             failed += 1
@@ -3228,33 +3264,50 @@ async def _check_offline_and_alert():
     back_online = known_offline - current_offline
     
     messages_sent = []
+    template_sid = os.environ.get("TWILIO_TEMPLATE_OFFLINE", "")
     
     # Alert for newly offline machines
     if newly_offline:
-        alert = f"⚠️ ALERT: {len(newly_offline)} machine(s) went OFFLINE\n\n"
+        details = ""
         for worker_id in newly_offline:
             detail = next((d for d in offline_details if d["worker_id"] == worker_id), None)
             if detail:
-                alert += f"❌ {detail['name']} ({detail['account']})\n"
+                details += f"❌ {detail['name']} ({detail['account']})\n"
             else:
-                alert += f"❌ {worker_id}\n"
+                details += f"❌ {worker_id}\n"
         
         try:
+            import json
             phone = admin_phone if admin_phone.startswith("+") else "+" + admin_phone
-            client_tw.messages.create(body=alert, from_=get_whatsapp_from(), to=f"whatsapp:{phone}")
+            if template_sid:
+                client_tw.messages.create(
+                    content_sid=template_sid,
+                    content_variables=json.dumps({"1": str(len(newly_offline)), "2": details.strip()}),
+                    from_=get_whatsapp_from(), to=f"whatsapp:{phone}"
+                )
+            else:
+                client_tw.messages.create(body=f"⚠️ ALERT: {len(newly_offline)} machine(s) went OFFLINE\n\n{details}", from_=get_whatsapp_from(), to=f"whatsapp:{phone}")
             messages_sent.append("offline_alert")
         except:
             pass
     
     # Alert for machines back online
     if back_online:
-        recovery = f"✅ RECOVERED: {len(back_online)} machine(s) back ONLINE\n\n"
+        recovery_details = ""
         for worker_id in back_online:
-            recovery += f"✅ {worker_id}\n"
+            recovery_details += f"✅ {worker_id}\n"
         
         try:
+            import json
             phone = admin_phone if admin_phone.startswith("+") else "+" + admin_phone
-            client_tw.messages.create(body=recovery, from_=get_whatsapp_from(), to=f"whatsapp:{phone}")
+            if template_sid:
+                client_tw.messages.create(
+                    content_sid=template_sid,
+                    content_variables=json.dumps({"1": "0", "2": f"✅ RECOVERED: {len(back_online)} machine(s) back ONLINE\n{recovery_details.strip()}"}),
+                    from_=get_whatsapp_from(), to=f"whatsapp:{phone}"
+                )
+            else:
+                client_tw.messages.create(body=f"✅ RECOVERED: {len(back_online)} machine(s) back ONLINE\n\n{recovery_details}", from_=get_whatsapp_from(), to=f"whatsapp:{phone}")
             messages_sent.append("recovery_alert")
         except:
             pass
