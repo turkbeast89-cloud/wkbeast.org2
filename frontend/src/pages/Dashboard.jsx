@@ -748,6 +748,7 @@ const Dashboard = () => {
                   <th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">IP</th>
                   <th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">Worker</th>
                   <th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">Model</th>
+                  <th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">Farm</th>
                   <th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">Hashrate</th>
                   <th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">Temp</th>
                   <th className="text-left py-2 px-3 text-xs text-gray-500 font-medium">Fan</th>
@@ -777,6 +778,7 @@ const Dashboard = () => {
                         <td className="py-2 px-3 font-mono text-xs text-gray-300">{m.ip}</td>
                         <td className="py-2 px-3 text-white font-medium text-xs">{m.worker_name || '—'}</td>
                         <td className="py-2 px-3 text-gray-400 text-xs">{m.model || '—'}</td>
+                        <td className="py-2 px-3 text-purple-400 text-xs">{m.farm || '—'}</td>
                         <td className="py-2 px-3 text-cyan-400 font-mono text-xs">{m.hashrate ? `${m.hashrate.toFixed(1)} GH/s` : '—'}</td>
                         <td className={`py-2 px-3 font-mono text-xs ${isHot ? 'text-red-400' : m.temperature > 0 ? 'text-orange-400' : 'text-gray-500'}`}>
                           {m.temperature > 0 ? `${m.temperature}°C` : '—'}

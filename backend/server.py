@@ -513,6 +513,7 @@ async def push_machine_data(data: dict):
         raise HTTPException(status_code=403, detail="Invalid API key")
     
     machines = data.get("machines", [])
+    farm = data.get("farm", "Main Farm")
     if not machines:
         return {"success": False, "error": "No machine data"}
     
@@ -534,6 +535,7 @@ async def push_machine_data(data: dict):
                 "model": m.get("model", ""),
                 "uptime": m.get("uptime", ""),
                 "pool": m.get("pool", ""),
+                "farm": m.get("farm", farm),
                 "updated_at": datetime.now(timezone.utc).isoformat()
             }},
             upsert=True
@@ -569,23 +571,32 @@ async def get_live_machine_data():
     return filtered
 
 @api_router.get("/machine-data/commands")
-async def get_pending_commands(api_key: str = ""):
+async def get_pending_commands(api_key: str = "", farm: str = ""):
     """PC app polls this to check for commands to execute"""
     expected_key = os.environ.get("MACHINE_SYNC_KEY", "wkbeast2025sync")
     if api_key != expected_key:
         raise HTTPException(status_code=403, detail="Invalid API key")
     
-    commands = await db.machine_commands.find({"status": "pending"}, {"_id": 0}).to_list(100)
+    query = {"status": "pending"}
+    if farm:
+        query["farm"] = farm
+    commands = await db.machine_commands.find(query, {"_id": 0}).to_list(100)
     return commands
 
 @api_router.post("/machine-data/command")
 async def create_machine_command(data: dict):
     """Create a command for the PC app to execute (reboot, change worker, etc.)"""
+    ip = data.get("ip", "")
+    # Look up which farm this machine belongs to
+    machine = await db.machine_live_data.find_one({"ip": ip}, {"_id": 0})
+    farm = machine.get("farm", "Main Farm") if machine else "Main Farm"
+    
     cmd = {
         "id": str(uuid.uuid4()),
-        "ip": data.get("ip", ""),
+        "ip": ip,
         "action": data.get("action", "reboot"),  # reboot, change_worker, change_pool
         "params": data.get("params", {}),
+        "farm": farm,
         "status": "pending",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "completed_at": None,
