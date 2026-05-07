@@ -28,6 +28,7 @@ const Dashboard = () => {
   const [liveMachines, setLiveMachines] = useState([]);
   const [liveMachinesLoading, setLiveMachinesLoading] = useState(false);
   const [liveFilter, setLiveFilter] = useState("customers");
+  const [liveSearch, setLiveSearch] = useState("");
   const [walletSwitch, setWalletSwitch] = useState({ switched: false });
   const [newWallet, setNewWallet] = useState("");
   const [selectedMachines, setSelectedMachines] = useState(new Set());
@@ -713,6 +714,13 @@ const Dashboard = () => {
               </div>
             </div>
             <div className="flex items-center gap-2">
+              <Input
+                placeholder="Search name, IP, farm..."
+                value={liveSearch}
+                onChange={(e) => setLiveSearch(e.target.value)}
+                className="bg-[#1A1A1A] border-[#27272A] text-sm w-48 h-8"
+                data-testid="live-search"
+              />
               <div className="flex items-center bg-[#1A1A1A] border border-[#27272A] rounded-lg overflow-hidden">
                 <button
                   onClick={() => setLiveFilter("customers")}
@@ -876,6 +884,14 @@ const Dashboard = () => {
               </thead>
               <tbody>
                 {liveMachines
+                  .filter(m => {
+                    if (!liveSearch.trim()) return true;
+                    const q = liveSearch.toLowerCase();
+                    return (m.worker_name || '').toLowerCase().includes(q) ||
+                           (m.ip || '').includes(q) ||
+                           (m.farm || '').toLowerCase().includes(q) ||
+                           (m.model || '').toLowerCase().includes(q);
+                  })
                   .sort((a, b) => (a.status === 'online' ? 1 : -1) - (b.status === 'online' ? 1 : -1))
                   .map((m, idx) => {
                     const isOnline = m.status === 'online';
