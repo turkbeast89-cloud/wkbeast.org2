@@ -3232,6 +3232,84 @@ async def _send_auto_reminders():
     if not settings:
         return {"success": False, "error": "App settings not configured"}
     
+    team = settings.get("team_name", "WKBeast Team")
+    
+    # On day 1: Send a nice message to prepaid customers
+    prepaid_sent = 0
+    if now.day == 1:
+        all_customers = await db.customers.find({}, {"_id": 0}).to_list(10000)
+        for customer in all_customers:
+            if customer.get("status") == "paused":
+                continue
+            remaining = customer.get("prepaid_months", 0)
+            # Customer just used a prepaid month (we decremented above), so add 1 back to show original
+            # Only send if they HAD prepaid months this cycle (payment was auto-paid)
+            payment = await db.payments.find_one({"customer_id": customer["id"], "month": current_month, "status": "paid"})
+            if not payment:
+                continue
+            # Check if this was a prepaid payment (generated as paid this cycle or had prepaid)
+            if remaining >= 0 and generated > 0:
+                # Check if this specific customer's payment was just generated as paid
+                was_prepaid = await db.payments.find_one({"customer_id": customer["id"], "month": current_month, "status": "paid"})
+                if was_prepaid and remaining >= 0:
+                    phone = customer.get("phone", "")
+                    if not phone:
+                        continue
+                    phone_clean = format_phone_whatsapp(phone)
+                    
+                    if remaining == 0:
+                        prepaid_msg = f"""✅ Dear {customer.get('name', 'Customer')},
+
+Good news! Your {current_month} hosting fee has been automatically covered by your prepaid balance.
+
+⚠️ This was your last prepaid month. Starting next month, you will need to pay your hosting fee on time.
+
+Thank you for being ahead!
+{team} 🐺💼
+
+━━━━━━━━━━━━━━━
+🤖 This is an automated message. Please do not reply to this number. For questions, contact us directly."""
+                    elif remaining == 1:
+                        prepaid_msg = f"""✅ Dear {customer.get('name', 'Customer')},
+
+Good news! Your {current_month} hosting fee has been automatically covered by your prepaid balance.
+
+📌 You have 1 month remaining on your prepaid balance. After that, monthly payments will resume.
+
+Thank you for being ahead!
+{team} 🐺💼
+
+━━━━━━━━━━━━━━━
+🤖 This is an automated message. Please do not reply to this number. For questions, contact us directly."""
+                    else:
+                        prepaid_msg = f"""✅ Dear {customer.get('name', 'Customer')},
+
+Good news! Your {current_month} hosting fee has been automatically covered by your prepaid balance.
+
+📌 You have {remaining} months remaining on your prepaid balance. Your next payment starts from {(now.month + remaining) % 12 or 12}/{now.year if now.month + remaining <= 12 else now.year + 1}.
+
+Thank you for being ahead!
+{team} 🐺💼
+
+━━━━━━━━━━━━━━━
+🤖 This is an automated message. Please do not reply to this number. For questions, contact us directly."""
+                    
+                    try:
+                        client_tw.messages.create(body=prepaid_msg, from_=get_whatsapp_from(), to=f"whatsapp:{phone_clean}")
+                        await db.whatsapp_logs.insert_one({
+                            "customer_id": customer.get("id", ""),
+                            "customer_name": customer.get("name", ""),
+                            "phone": phone_clean,
+                            "message": prepaid_msg,
+                            "type": "prepaid_confirmation",
+                            "direction": "outbound",
+                            "status": "sent",
+                            "created_at": now.isoformat()
+                        })
+                        prepaid_sent += 1
+                    except:
+                        pass
+    
     # Now send reminders to unpaid customers
     payments = await db.payments.find({"month": current_month, "status": "unpaid"}, {"_id": 0}).to_list(10000)
     customers = await db.customers.find({}, {"_id": 0}).to_list(10000)
@@ -3369,7 +3447,7 @@ If you have already paid, please ignore this message.
         {"$set": {"last_reminder_sent": now.isoformat()}}
     )
     
-    return {"success": True, "sent": sent, "failed": failed, "generated": generated, "month": current_month, "message_type": message_type}
+    return {"success": True, "sent": sent, "failed": failed, "generated": generated, "prepaid_notified": prepaid_sent, "month": current_month, "message_type": message_type}
 
 async def _check_offline_and_alert(force_send=False):
     """Internal: Check for offline machines and alert admin. force_send=True always sends alert."""
