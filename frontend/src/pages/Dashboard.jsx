@@ -89,7 +89,10 @@ const Dashboard = () => {
   const fetchSyncMismatch = async (forceRefresh = false) => {
     setMismatchLoading(true);
     try {
-      const qs = forceRefresh ? "?force_refresh=true" : "";
+      const params = new URLSearchParams();
+      if (forceRefresh) params.set("force_refresh", "true");
+      if (monitorMode) params.set("mode", monitorMode);
+      const qs = params.toString() ? `?${params.toString()}` : "";
       const res = await axios.get(`${API}/admin/sync-mismatch${qs}`);
       setMismatch(res.data);
       setMismatchOpen(true);
@@ -845,7 +848,8 @@ const Dashboard = () => {
                   <AlertCircle size={16} className="text-amber-400" />
                   <span className="text-sm font-bold text-white">Sync Mismatch Report</span>
                   <span className="text-xs text-gray-500">
-                    ViaBTC: {mismatch.viabtc_total} workers · Local: {mismatch.pc_total} machines
+                    ViaBTC: {mismatch.viabtc_total} online workers · Local: {mismatch.pc_total} customer machines
+                    {mismatch.mode && <span className="ml-1 opacity-60">({mismatch.mode})</span>}
                   </span>
                 </div>
                 <div className="flex items-center gap-1">

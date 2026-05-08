@@ -2850,28 +2850,24 @@ _watcher_monitor_cache = {"data": None, "timestamp": 0}
 
 
 @api_router.get("/admin/sync-mismatch")
-async def get_sync_mismatch(force_refresh: bool = False):
+async def get_sync_mismatch(force_refresh: bool = False, mode: str = "api"):
     """Compare ViaBTC pool workers vs PC-sync local machines and report which
     workers are missing on either side. Helps identify miners that the local PC sync
     couldn't reach (offline LAN, wrong subnet, blocked port, etc).
 
+    mode='api' (default) uses the main account API key to see ALL workers in the pool
+    (matches what the dashboard shows in API mode). Falls back to watcher if API fails.
+
     Returns:
-      - viabtc_only: ONLINE workers seen by ViaBTC but with no matching PC-sync IP.
-                     These are miners hashing in the pool but invisible to local sync.
-      - pc_only: machines in PC sync but with no matching ViaBTC worker.
-                 These are miners reachable on LAN but not currently in any pool.
+      - viabtc_only: workers seen by ViaBTC but with no matching PC-sync entry.
+      - pc_only: customer machines in PC sync but no matching pool worker.
     """
-    # 1) Pull current ViaBTC worker list from cache (or fetch fresh)
-    current_time = time.time()
-    cache_valid = (
-        not force_refresh
-        and _watcher_monitor_cache["data"]
-        and (current_time - _watcher_monitor_cache["timestamp"]) < CACHE_TTL
-    )
-    if cache_valid:
-        viabtc_data = _watcher_monitor_cache["data"]
-    else:
-        viabtc_data = await get_machine_monitor_watcher(force_refresh=force_refresh)
+    # 1) Pull current ViaBTC worker list using the SAME source the dashboard uses
+    viabtc_data = await get_machine_monitor(force_refresh=force_refresh, mode=mode)
+
+    # If API mode failed (e.g. no API keys), auto-fall back to watcher mode
+    if (not viabtc_data or not viabtc_data.get("success")) and mode == "api":
+        viabtc_data = await get_machine_monitor(force_refresh=force_refresh, mode="watcher")
 
     if not viabtc_data or not viabtc_data.get("success"):
         return {
@@ -2880,13 +2876,14 @@ async def get_sync_mismatch(force_refresh: bool = False):
         }
 
     # 2) Flatten ALL ViaBTC workers (online + offline) into a list of records
-    #    Each record: {account, worker_name, coin, status}
     viabtc_workers = []
     for acc in viabtc_data.get("accounts", []):
         account_label = acc.get("account", "")
+        acc_worker_name = acc.get("worker_name", "")
         for w in acc.get("online_workers", []) or []:
             viabtc_workers.append({
                 "account": account_label,
+                "account_worker": acc_worker_name,
                 "worker_name": w.get("name", ""),
                 "coin": w.get("coin", ""),
                 "status": "online",
@@ -2895,37 +2892,58 @@ async def get_sync_mismatch(force_refresh: bool = False):
         for w in acc.get("offline_workers", []) or []:
             viabtc_workers.append({
                 "account": account_label,
+                "account_worker": acc_worker_name,
                 "worker_name": w.get("name", ""),
                 "coin": w.get("coin", ""),
-                "status": "offline",
+                "status": w.get("status", "offline"),
                 "hashrate": 0,
             })
 
-    # 3) Pull all PC-sync machines and build lowercase worker-name set + ip map
-    pc_machines = await db.machine_live_data.find({}, {"_id": 0}).to_list(10000)
+    # 3) Pull PC-sync machines, filtered to customer-tagged ones (same set the
+    #    Live Machine Control Panel shows under "My Customers").
+    pc_machines_all = await db.machine_live_data.find({}, {"_id": 0}).to_list(10000)
+    accounts = await db.customer_accounts.find({}, {"_id": 0, "worker_name": 1}).to_list(10000)
+    customer_workers = set()
+    for acc in accounts:
+        wn = (acc.get("worker_name") or "").lower().strip()
+        if wn:
+            customer_workers.add(wn)
+
+    pc_machines = []
+    for m in pc_machines_all:
+        worker = (m.get("worker_name") or "").lower().strip()
+        if not worker:
+            continue
+        is_customer = False
+        for cw in customer_workers:
+            if cw in worker or worker in cw:
+                is_customer = True
+                break
+        if is_customer:
+            pc_machines.append(m)
+
     pc_worker_set = set()
-    pc_worker_to_ip = {}
     for m in pc_machines:
         wn = (m.get("worker_name") or "").strip().lower()
         if wn:
             pc_worker_set.add(wn)
-            pc_worker_to_ip.setdefault(wn, m.get("ip", ""))
+            # Also add the trailing portion (after last dot) for tail matching
+            if "." in wn:
+                pc_worker_set.add(wn.rsplit(".", 1)[-1])
 
-    # 4) For each ViaBTC worker, check if its name is present in PC sync.
-    #    Match logic: case-insensitive exact match on the *full* worker name OR
-    #    on the trailing ".sub" portion (some Antminers report only the sub part).
+    # 4) For each ViaBTC ONLINE worker, check if its name is present in PC sync.
+    #    We only care about online ones — offline ViaBTC workers are usually stale entries.
     def _matches_pc(name: str) -> bool:
         n = (name or "").strip().lower()
         if not n:
             return False
         if n in pc_worker_set:
             return True
-        # Try trailing portion after the last dot (".001" style)
         if "." in n:
             tail = n.rsplit(".", 1)[-1]
             if tail and tail in pc_worker_set:
                 return True
-        # Try matching against any PC worker that ENDS with this sub
+        # Try fuzzy: any pc worker that ENDS or STARTS with this name
         for pwn in pc_worker_set:
             if pwn.endswith("." + n) or n.endswith("." + pwn):
                 return True
@@ -2934,16 +2952,18 @@ async def get_sync_mismatch(force_refresh: bool = False):
     viabtc_only = []
     seen_keys = set()
     for w in viabtc_workers:
+        # Only flag ONLINE workers that aren't synced. Offline ones are likely stale.
+        if w["status"] != "online":
+            continue
         if _matches_pc(w["worker_name"]):
             continue
-        # Dedup by (worker_name, coin)
         key = (w["worker_name"].lower(), w["coin"])
         if key in seen_keys:
             continue
         seen_keys.add(key)
         viabtc_only.append(w)
 
-    # 5) PC-only: workers visible locally but NO ViaBTC pool entry at all
+    # 5) PC-only: customer machines visible locally but NO matching pool entry at all
     viabtc_worker_names = set()
     for w in viabtc_workers:
         n = (w.get("worker_name") or "").strip().lower()
@@ -2957,12 +2977,10 @@ async def get_sync_mismatch(force_refresh: bool = False):
         wn = (m.get("worker_name") or "").strip().lower()
         if not wn:
             continue
-        # Check direct match or tail match
         match = wn in viabtc_worker_names
         if not match and "." in wn:
             match = wn.rsplit(".", 1)[-1] in viabtc_worker_names
         if not match:
-            # Try suffix match against any viabtc name
             for vbtc_name in viabtc_worker_names:
                 if vbtc_name.endswith("." + wn) or wn.endswith("." + vbtc_name):
                     match = True
@@ -2978,11 +2996,12 @@ async def get_sync_mismatch(force_refresh: bool = False):
 
     return {
         "success": True,
+        "mode": viabtc_data.get("mode", mode),
         "viabtc_only": viabtc_only,           # in pool but missing from PC sync
         "pc_only": pc_only,                    # in PC sync but missing from pool
-        "viabtc_total": len(viabtc_workers),
+        "viabtc_total": sum(1 for w in viabtc_workers if w["status"] == "online"),
         "pc_total": len(pc_machines),
-        "checked_at": current_time,
+        "checked_at": time.time(),
     }
 
 
