@@ -1102,6 +1102,15 @@ const Dashboard = () => {
                             <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-[#00E054]' : m.status === 'crashed' ? 'bg-red-400' : 'bg-gray-400'}`} />
                             {m.status || 'unknown'}
                           </span>
+                          {m.stale && m.seconds_since_update && (
+                            <div className="text-[10px] text-amber-400 mt-0.5" title={`Last update ${m.seconds_since_update}s ago`}>
+                              {m.seconds_since_update >= 86400
+                                ? `${Math.floor(m.seconds_since_update / 86400)}d ${Math.floor((m.seconds_since_update % 86400) / 3600)}h ago`
+                                : m.seconds_since_update >= 3600
+                                  ? `${Math.floor(m.seconds_since_update / 3600)}h ${Math.floor((m.seconds_since_update % 3600) / 60)}m ago`
+                                  : `${Math.floor(m.seconds_since_update / 60)}m ago`}
+                            </div>
+                          )}
                         </td>
                         <td className="py-2 px-3 font-mono text-xs text-gray-300">{m.ip}</td>
                         <td className="py-2 px-3 text-white font-medium text-xs">

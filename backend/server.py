@@ -531,31 +531,42 @@ async def push_machine_data(data: dict):
         ip = m.get("ip", "")
         if not ip or ip in hidden_ips:
             continue
-        
+
+        # Build update dict but DO NOT overwrite worker_name/model with empty values.
+        # When a miner goes offline, MineFleet often pushes with blank worker_name,
+        # which would erase the customer-tag and make the row vanish from "My Customers".
+        new_worker_name = (m.get("worker_name") or "").strip()
+        new_model = (m.get("model") or "").strip()
+
         update_data = {
             "ip": ip,
             "hashrate": m.get("hashrate", 0),
             "temperature": m.get("temperature", 0),
             "fan_speed": m.get("fan_speed", 0),
             "power": m.get("power", 0),
-            "status": m.get("status", "online"),
+            "status": m.get("status") or "online",
             "uptime": m.get("uptime", ""),
             "pool": m.get("pool", ""),
             "farm": m.get("farm", farm),
             "updated_at": datetime.now(timezone.utc).isoformat()
         }
-        
-        if ip not in renamed_ips:
-            update_data["worker_name"] = m.get("worker_name", "")
-            update_data["model"] = m.get("model", "")
-        
+
+        # Track when the machine was last seen ONLINE so we know its real "last alive" time
+        if update_data["status"] == "online":
+            update_data["last_online_at"] = update_data["updated_at"]
+
+        if ip not in renamed_ips and new_worker_name:
+            update_data["worker_name"] = new_worker_name
+        if new_model:
+            update_data["model"] = new_model
+
         from pymongo import UpdateOne
         ops.append(UpdateOne({"ip": ip}, {"$set": update_data}, upsert=True))
         synced += 1
-    
+
     if ops:
         await db.machine_live_data.bulk_write(ops)
-    
+
     return {"success": True, "synced": synced}
 
 @api_router.get("/machine-data/live")
@@ -579,7 +590,12 @@ async def get_live_machine_data(filter_customers: bool = True):
         for o in (switch_data.get("originals") or []):
             originals_by_ip[o.get("ip", "")] = o.get("original_worker", "")
 
-    # Mark each machine as customer or not + attach original_worker memory
+    # Mark each machine as customer or not + attach original_worker memory.
+    # Also auto-flip status to "offline" if the machine hasn't been updated in >10 minutes
+    # (PC sync runs every 2 min; >10 min means it's been missing for 5+ cycles).
+    now = datetime.now(timezone.utc)
+    STALE_THRESHOLD_SECONDS = 600  # 10 minutes
+
     for m in machines:
         worker = m.get("worker_name", "").lower().strip()
         is_customer = False
@@ -589,6 +605,24 @@ async def get_live_machine_data(filter_customers: bool = True):
                     is_customer = True
                     break
         m["is_customer"] = is_customer
+
+        # Compute staleness so the dashboard can show "offline" even if the row was
+        # never refreshed with status=offline (e.g. MineFleet dropped it from config).
+        updated_at_str = m.get("updated_at", "")
+        seconds_since_update = None
+        if updated_at_str:
+            try:
+                updated_dt = datetime.fromisoformat(updated_at_str.replace("Z", "+00:00"))
+                seconds_since_update = (now - updated_dt).total_seconds()
+            except Exception:
+                seconds_since_update = None
+
+        if seconds_since_update is not None and seconds_since_update > STALE_THRESHOLD_SECONDS:
+            m["status"] = "offline"
+            m["stale"] = True
+            m["seconds_since_update"] = int(seconds_since_update)
+        else:
+            m["stale"] = False
 
         # Attach original_worker if a switch is active AND the original differs from the current worker
         orig = originals_by_ip.get(m.get("ip", ""), "").strip()
