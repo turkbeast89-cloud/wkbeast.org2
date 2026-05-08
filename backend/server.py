@@ -2927,24 +2927,34 @@ async def get_sync_mismatch(force_refresh: bool = False, mode: str = "api"):
         wn = (m.get("worker_name") or "").strip().lower()
         if wn:
             pc_worker_set.add(wn)
-            # Also add the trailing portion (after last dot) for tail matching
-            if "." in wn:
-                pc_worker_set.add(wn.rsplit(".", 1)[-1])
+            # Add EVERY dot-separated segment so any of them can match a ViaBTC name.
+            # Skip pure-numeric segments like "001" which are too generic and would cause
+            # false positives across different sub-accounts.
+            for seg in wn.split("."):
+                if seg and not seg.isdigit():
+                    pc_worker_set.add(seg)
 
     # 4) For each ViaBTC ONLINE worker, check if its name is present in PC sync.
     #    We only care about online ones — offline ViaBTC workers are usually stale entries.
+    #    Match logic handles all combos:
+    #      - exact: "sarywk" == "sarywk"
+    #      - head match: viabtc "sarywk" ↔ pc "sarywk.001" (pc starts with viabtc + ".")
+    #      - tail match: viabtc "sarywk" ↔ pc "turkbeast.sarywk" (pc ends with "." + viabtc)
+    #      - reverse head: viabtc "sarywk.001" ↔ pc "sarywk" (viabtc starts with pc + ".")
+    #      - reverse tail: viabtc "turkbeast.sarywk" ↔ pc "sarywk" (viabtc ends with "." + pc)
     def _matches_pc(name: str) -> bool:
         n = (name or "").strip().lower()
         if not n:
             return False
         if n in pc_worker_set:
             return True
-        if "." in n:
-            tail = n.rsplit(".", 1)[-1]
-            if tail and tail in pc_worker_set:
-                return True
-        # Try fuzzy: any pc worker that ENDS or STARTS with this name
         for pwn in pc_worker_set:
+            if not pwn:
+                continue
+            # head match either direction
+            if pwn.startswith(n + ".") or n.startswith(pwn + "."):
+                return True
+            # tail match either direction
             if pwn.endswith("." + n) or n.endswith("." + pwn):
                 return True
         return False
@@ -2969,8 +2979,9 @@ async def get_sync_mismatch(force_refresh: bool = False, mode: str = "api"):
         n = (w.get("worker_name") or "").strip().lower()
         if n:
             viabtc_worker_names.add(n)
-            if "." in n:
-                viabtc_worker_names.add(n.rsplit(".", 1)[-1])
+            for seg in n.split("."):
+                if seg and not seg.isdigit():
+                    viabtc_worker_names.add(seg)
 
     pc_only = []
     for m in pc_machines:
@@ -2978,10 +2989,13 @@ async def get_sync_mismatch(force_refresh: bool = False, mode: str = "api"):
         if not wn:
             continue
         match = wn in viabtc_worker_names
-        if not match and "." in wn:
-            match = wn.rsplit(".", 1)[-1] in viabtc_worker_names
         if not match:
             for vbtc_name in viabtc_worker_names:
+                if not vbtc_name:
+                    continue
+                if vbtc_name.startswith(wn + ".") or wn.startswith(vbtc_name + "."):
+                    match = True
+                    break
                 if vbtc_name.endswith("." + wn) or wn.endswith("." + vbtc_name):
                     match = True
                     break
