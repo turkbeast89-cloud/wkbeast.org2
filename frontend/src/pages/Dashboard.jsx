@@ -969,6 +969,29 @@ const Dashboard = () => {
                             title="Click to rename"
                           >{m.worker_name || '—'}</span>
                           {m.is_customer && <span className="ml-1 text-[10px] bg-[#00E054]/20 text-[#00E054] px-1 rounded">customer</span>}
+                          {m.original_worker && (
+                            <div className="flex items-center gap-1 mt-0.5 text-[10px] text-amber-400/80">
+                              <span title="Original worker before the temporary switch">was: {m.original_worker}</span>
+                              <button
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  if (!window.confirm(`Forget original worker "${m.original_worker}" for ${m.ip}?\n\nThis only clears the saved memory — it does NOT change the miner.`)) return;
+                                  try {
+                                    await axios.post(`${API}/machine-data/clear-original`, { ip: m.ip });
+                                    toast.success("Original worker memory cleared");
+                                    fetchLiveMachines();
+                                  } catch (err) {
+                                    toast.error("Failed to clear");
+                                  }
+                                }}
+                                title="Forget original worker memory"
+                                className="p-0.5 rounded hover:bg-amber-500/20 hover:text-amber-300 transition-colors"
+                                data-testid={`clear-original-${m.ip}`}
+                              >
+                                <X size={10} />
+                              </button>
+                            </div>
+                          )}
                         </td>
                         <td className="py-2 px-3 text-gray-400 text-xs">{m.model || '—'}</td>
                         <td className="py-2 px-3 text-purple-400 text-xs">{m.farm || '—'}</td>

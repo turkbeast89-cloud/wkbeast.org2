@@ -562,7 +562,7 @@ async def push_machine_data(data: dict):
 async def get_live_machine_data(filter_customers: bool = True):
     """Get live machine data. filter_customers=true shows only customer machines, false shows all."""
     machines = await db.machine_live_data.find({}, {"_id": 0}).to_list(10000)
-    
+
     # Get all customer worker names
     accounts = await db.customer_accounts.find({}, {"_id": 0, "worker_name": 1}).to_list(10000)
     customer_workers = set()
@@ -570,8 +570,16 @@ async def get_live_machine_data(filter_customers: bool = True):
         wn = acc.get("worker_name", "").lower().strip()
         if wn:
             customer_workers.add(wn)
-    
-    # Mark each machine as customer or not
+
+    # Get currently-saved "original worker" memory keyed by IP (from a wallet switch)
+    switch_data = await db.wallet_switch.find_one({"id": "wallet_switch"}, {"_id": 0})
+    originals_by_ip = {}
+    switched_active = bool(switch_data and switch_data.get("switched"))
+    if switch_data:
+        for o in (switch_data.get("originals") or []):
+            originals_by_ip[o.get("ip", "")] = o.get("original_worker", "")
+
+    # Mark each machine as customer or not + attach original_worker memory
     for m in machines:
         worker = m.get("worker_name", "").lower().strip()
         is_customer = False
@@ -581,11 +589,42 @@ async def get_live_machine_data(filter_customers: bool = True):
                     is_customer = True
                     break
         m["is_customer"] = is_customer
-    
+
+        # Attach original_worker if a switch is active AND the original differs from the current worker
+        orig = originals_by_ip.get(m.get("ip", ""), "").strip()
+        if switched_active and orig and orig.lower() != (m.get("worker_name", "") or "").lower():
+            m["original_worker"] = orig
+
     if filter_customers:
         return [m for m in machines if m["is_customer"]]
-    
+
     return machines
+
+
+@api_router.post("/machine-data/clear-original")
+async def clear_original_for_ip(data: dict):
+    """Forget the saved 'original worker' memory for one specific IP.
+    Use this when you want to keep the temporary worker permanent (no restore).
+    Body: {ip}
+    """
+    ip = (data.get("ip") or "").strip()
+    if not ip:
+        raise HTTPException(status_code=400, detail="ip is required")
+
+    switch_data = await db.wallet_switch.find_one({"id": "wallet_switch"}, {"_id": 0})
+    if not switch_data:
+        return {"success": True, "removed": 0}
+
+    originals = switch_data.get("originals") or []
+    new_originals = [o for o in originals if o.get("ip") != ip]
+    removed = len(originals) - len(new_originals)
+
+    await db.wallet_switch.update_one(
+        {"id": "wallet_switch"},
+        {"$set": {"originals": new_originals}}
+    )
+
+    return {"success": True, "removed": removed}
 
 @api_router.get("/machine-data/commands")
 async def get_pending_commands(api_key: str = "", farm: str = ""):
