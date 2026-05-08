@@ -32,9 +32,17 @@ Full-stack application to manage a crypto mining farm. Core requirements include
 - CoinGecko crypto price integration
 
 ## Recent Changes (Feb 2026)
-- **Hide stale ViaBTC workers**: New endpoints `POST /api/viabtc/hide-worker`, `POST /api/viabtc/unhide-worker`, `GET /api/viabtc/hidden-workers`. New `db.hidden_workers` collection. Both `/admin/machine-monitor` and `/admin/machine-monitor-watcher` now filter hidden entries from offline lists and counts. Cache busts on hide/unhide.
-- **Frontend hide button**: Each card in the "Offline Machines" alert on Dashboard.jsx now has an `X` button to hide that stale entry permanently (until manually unhidden).
-- **switch-workers originals overwrite bug**: Fixed `/api/machine-data/switch-workers` to preserve previously-saved originals when a switch is already active, so Restore Workers actually restores to the *real* original worker.
+- **Sync Mismatch Report** (`GET /api/admin/sync-mismatch`): Compares ViaBTC pool workers vs PC-sync local machines. Returns:
+  - `viabtc_only`: workers in pool but missing from local PC sync (likely unreachable miners on LAN)
+  - `pc_only`: machines synced locally but no matching pool worker (rebooted / wrong pool)
+  - Smart matching: case-insensitive + tail-match (`account.001` matches `001` or `001.account`)
+  - Reuses watcher monitor cache to avoid re-hitting ViaBTC.
+- **Frontend**: New "Sync Check" button in Live Machine Control Panel header. Opens an amber-bordered side-by-side report panel.
+- **Original-worker auto-deactivate**: When the last `original_worker` memory is cleared via ✕, `wallet_switch.switched` flips to `false` automatically — so the "Active → newworker" badge and "Restore Original Workers" button disappear.
+- **Hide stale ViaBTC workers**: New endpoints `POST /api/viabtc/hide-worker`, `POST /api/viabtc/unhide-worker`, `GET /api/viabtc/hidden-workers`. New `db.hidden_workers` collection. Both `/admin/machine-monitor` and `/admin/machine-monitor-watcher` filter hidden entries from offline lists/counts.
+- **Live machines now expose `original_worker`**: `/api/machine-data/live` enriches each row with the saved original (when a wallet switch is active). Frontend renders "was: <original>" with a ✕ to forget that memory per IP.
+- **Frontend hide button**: ✕ on each card in "Offline Machines" red alert hides stale ViaBTC entries.
+- **switch-workers originals overwrite bug**: Fixed `/api/machine-data/switch-workers` to preserve previously-saved originals when a switch is already active.
 - **Pre-existing fix**: `worker_to_ip_map` was undefined in `/admin/machine-monitor` watcher mode (would NameError on offline workers). Now properly built from `machine_live_data`.
 - **wkbeast_sync.py - Change Worker fix v2 (validated on user's L9)**:
   - Primary path: HTTP web UI (`get_miner_conf.cgi` → mutate pools[*].user → `set_miner_conf.cgi`) — persistent.

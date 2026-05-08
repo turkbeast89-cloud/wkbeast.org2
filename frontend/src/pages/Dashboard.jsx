@@ -33,6 +33,9 @@ const Dashboard = () => {
   const [newWallet, setNewWallet] = useState("");
   const [selectedMachines, setSelectedMachines] = useState(new Set());
   const [selectMode, setSelectMode] = useState(false);
+  const [mismatch, setMismatch] = useState(null);
+  const [mismatchLoading, setMismatchLoading] = useState(false);
+  const [mismatchOpen, setMismatchOpen] = useState(false);
 
   // Helper to format hashrate
   const formatHashrate = (hashrate, coin) => {
@@ -81,6 +84,20 @@ const Dashboard = () => {
       setLiveMachines(res.data);
       setWalletSwitch(switchRes.data);
     } catch (e) {}
+  };
+
+  const fetchSyncMismatch = async (forceRefresh = false) => {
+    setMismatchLoading(true);
+    try {
+      const qs = forceRefresh ? "?force_refresh=true" : "";
+      const res = await axios.get(`${API}/admin/sync-mismatch${qs}`);
+      setMismatch(res.data);
+      setMismatchOpen(true);
+    } catch (e) {
+      toast.error("Failed to load sync mismatch");
+    } finally {
+      setMismatchLoading(false);
+    }
   };
 
   const fetchStats = async () => {
@@ -773,6 +790,17 @@ const Dashboard = () => {
               <Button
                 variant="outline"
                 size="sm"
+                onClick={() => fetchSyncMismatch(false)}
+                className="border-[#27272A] hover:bg-[#27272A]"
+                data-testid="check-sync-mismatch"
+                title="Find machines visible in ViaBTC pool but not synced from your local PC"
+              >
+                <AlertCircle size={14} className={`mr-2 ${mismatchLoading ? 'animate-pulse' : ''}`} />
+                Sync Check
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => { setLiveMachinesLoading(true); fetchLiveMachines().finally(() => setLiveMachinesLoading(false)); }}
                 className="border-[#27272A] hover:bg-[#27272A]"
                 data-testid="refresh-live-machines"
@@ -808,6 +836,116 @@ const Dashboard = () => {
               </p>
             </div>
           </div>
+
+          {/* Sync Mismatch Panel */}
+          {mismatchOpen && mismatch && (
+            <div className="bg-[#0A0A0A] rounded-lg border border-amber-500/30 p-4 mb-4" data-testid="sync-mismatch-panel">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <AlertCircle size={16} className="text-amber-400" />
+                  <span className="text-sm font-bold text-white">Sync Mismatch Report</span>
+                  <span className="text-xs text-gray-500">
+                    ViaBTC: {mismatch.viabtc_total} workers · Local: {mismatch.pc_total} machines
+                  </span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => fetchSyncMismatch(true)}
+                    className="text-xs text-cyan-400 hover:text-cyan-300 px-2 py-1"
+                    data-testid="refresh-sync-mismatch"
+                  >
+                    <RefreshCw size={12} className={`inline mr-1 ${mismatchLoading ? 'animate-spin' : ''}`} />
+                    Refresh
+                  </button>
+                  <button
+                    onClick={() => setMismatchOpen(false)}
+                    className="text-gray-500 hover:text-white p-1"
+                    aria-label="Close"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              </div>
+
+              {!mismatch.success && (
+                <p className="text-sm text-red-400">{mismatch.error || "Failed to compare"}</p>
+              )}
+
+              {mismatch.success && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {/* In ViaBTC pool but missing from PC sync */}
+                  <div className="bg-[#1A1A1A] rounded-lg p-3 border border-amber-500/20">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-semibold text-amber-400">
+                        In Pool but NOT synced locally
+                      </span>
+                      <span className="text-xs bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full">
+                        {mismatch.viabtc_only?.length || 0}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-gray-500 mb-2">
+                      These miners are hashing in ViaBTC but your PC sync can't see their IPs (offline LAN, blocked port, wrong subnet).
+                    </p>
+                    {(mismatch.viabtc_only?.length || 0) === 0 ? (
+                      <p className="text-xs text-gray-500 italic">All ViaBTC workers are accounted for locally ✓</p>
+                    ) : (
+                      <div className="space-y-1 max-h-64 overflow-y-auto">
+                        {mismatch.viabtc_only.map((w, i) => (
+                          <div key={`vbtc-${i}`} className="flex items-center justify-between bg-[#0A0A0A] rounded px-2 py-1.5">
+                            <div className="min-w-0 flex-1">
+                              <span className="text-xs font-medium text-white">{w.worker_name}</span>
+                              <span className="text-[10px] text-gray-500 ml-2">({w.account})</span>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                                w.coin === 'LTC' ? 'bg-gray-700 text-gray-300' : 'bg-teal-900 text-teal-300'
+                              }`}>{w.coin}</span>
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                                w.status === 'online' ? 'bg-[#00E054]/10 text-[#00E054]' : 'bg-red-500/10 text-red-400'
+                              }`}>{w.status}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* In PC sync but missing from ViaBTC */}
+                  <div className="bg-[#1A1A1A] rounded-lg p-3 border border-cyan-500/20">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-semibold text-cyan-400">
+                        Synced locally but NOT in pool
+                      </span>
+                      <span className="text-xs bg-cyan-500/20 text-cyan-400 px-2 py-0.5 rounded-full">
+                        {mismatch.pc_only?.length || 0}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-gray-500 mb-2">
+                      These miners are reachable on your LAN but ViaBTC sees no worker — likely on wrong pool or just rebooted.
+                    </p>
+                    {(mismatch.pc_only?.length || 0) === 0 ? (
+                      <p className="text-xs text-gray-500 italic">All local machines are visible in the pool ✓</p>
+                    ) : (
+                      <div className="space-y-1 max-h-64 overflow-y-auto">
+                        {mismatch.pc_only.map((m, i) => (
+                          <div key={`pc-${i}`} className="flex items-center justify-between bg-[#0A0A0A] rounded px-2 py-1.5">
+                            <div className="min-w-0 flex-1">
+                              <span className="text-xs font-mono text-cyan-300">{m.ip}</span>
+                              <span className="text-[10px] text-white ml-2">{m.worker_name || '—'}</span>
+                              {m.farm && <span className="text-[10px] text-purple-400 ml-1">({m.farm})</span>}
+                            </div>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                              m.status === 'online' ? 'bg-[#00E054]/10 text-[#00E054]' : 'bg-red-500/10 text-red-400'
+                            }`}>{m.status}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Wallet Switch Controls */}
           <div className="bg-[#0A0A0A] rounded-lg border border-[#27272A] p-4 mb-4" data-testid="wallet-switch">
