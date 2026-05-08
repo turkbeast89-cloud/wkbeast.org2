@@ -686,14 +686,27 @@ async def switch_workers(data: dict):
                     break
     
     # Save original workers before switching (for restore)
+    # IMPORTANT: if a switch is already active, do NOT overwrite the saved originals
+    # otherwise restore would target the already-switched values instead of the real originals.
+    existing_switch = await db.wallet_switch.find_one({"id": "wallet_switch"}, {"_id": 0})
+    already_switched = bool(existing_switch and existing_switch.get("switched"))
+    existing_originals_by_ip = {}
+    if already_switched:
+        for o in (existing_switch.get("originals") or []):
+            existing_originals_by_ip[o.get("ip", "")] = o.get("original_worker", "")
+
     originals = []
     commands_created = 0
-    
+
     for ip in machine_ips:
         machine = await db.machine_live_data.find_one({"ip": ip}, {"_id": 0})
         if machine:
-            originals.append({"ip": ip, "original_worker": machine.get("worker_name", "")})
-            
+            # Preserve previously-saved original if a switch is already active for this IP
+            if ip in existing_originals_by_ip:
+                originals.append({"ip": ip, "original_worker": existing_originals_by_ip[ip]})
+            else:
+                originals.append({"ip": ip, "original_worker": machine.get("worker_name", "")})
+
             # Look up farm for this machine
             farm = machine.get("farm", "Main Farm")
             
@@ -2709,6 +2722,81 @@ async def auto_create_customer_accounts():
     
     return {"message": f"Created {created} accounts"}
 
+# ==================== HIDDEN WORKERS (manual cleanup of stale ViaBTC entries) ====================
+# When a customer's worker is renamed on the miner, ViaBTC keeps the old worker name
+# as "offline" for ~7 days before auto-purging. These endpoints let the admin manually
+# hide those stale entries from the dashboard without waiting.
+
+def _hidden_worker_key(account: str, machine_name: str, coin: str) -> str:
+    return f"{(account or '').strip().lower()}||{(machine_name or '').strip().lower()}||{(coin or '').strip().upper()}"
+
+
+async def _get_hidden_workers_set():
+    """Returns a set of canonical hidden-worker keys for fast lookup."""
+    docs = await db.hidden_workers.find({}, {"_id": 0}).to_list(10000)
+    return set(_hidden_worker_key(d.get("account", ""), d.get("machine_name", ""), d.get("coin", "")) for d in docs)
+
+
+@api_router.post("/viabtc/hide-worker")
+async def hide_worker(data: dict):
+    """Hide a stale ViaBTC worker entry from the dashboard.
+    Body: {account, machine_name, coin}
+    """
+    global _watcher_monitor_cache, _machine_monitor_cache
+    account = (data.get("account") or "").strip()
+    machine_name = (data.get("machine_name") or "").strip()
+    coin = (data.get("coin") or "").strip().upper()
+    if not machine_name or not coin:
+        raise HTTPException(status_code=400, detail="machine_name and coin are required")
+
+    doc = {
+        "id": str(uuid.uuid4()),
+        "account": account,
+        "machine_name": machine_name,
+        "coin": coin,
+        "key": _hidden_worker_key(account, machine_name, coin),
+        "hidden_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.hidden_workers.update_one({"key": doc["key"]}, {"$set": doc}, upsert=True)
+
+    # Bust monitor caches so the dashboard reflects the change immediately
+    _watcher_monitor_cache["data"] = None
+    _watcher_monitor_cache["timestamp"] = 0
+    try:
+        _machine_monitor_cache.clear()
+    except Exception:
+        pass
+
+    return {"success": True, "hidden": doc["key"]}
+
+
+@api_router.post("/viabtc/unhide-worker")
+async def unhide_worker(data: dict):
+    """Restore a hidden ViaBTC worker entry. Body: {account, machine_name, coin}"""
+    global _watcher_monitor_cache, _machine_monitor_cache
+    account = (data.get("account") or "").strip()
+    machine_name = (data.get("machine_name") or "").strip()
+    coin = (data.get("coin") or "").strip().upper()
+    key = _hidden_worker_key(account, machine_name, coin)
+    res = await db.hidden_workers.delete_one({"key": key})
+
+    _watcher_monitor_cache["data"] = None
+    _watcher_monitor_cache["timestamp"] = 0
+    try:
+        _machine_monitor_cache.clear()
+    except Exception:
+        pass
+
+    return {"success": True, "removed": res.deleted_count}
+
+
+@api_router.get("/viabtc/hidden-workers")
+async def list_hidden_workers():
+    """List all currently hidden workers."""
+    docs = await db.hidden_workers.find({}, {"_id": 0}).to_list(10000)
+    return {"success": True, "hidden": docs, "count": len(docs)}
+
+
 # ==================== WATCHER-BASED MACHINE MONITORING ====================
 # Cache for watcher monitor
 _watcher_monitor_cache = {"data": None, "timestamp": 0}
@@ -2789,6 +2877,9 @@ async def get_machine_monitor_watcher(force_refresh: bool = False):
         wn = lm.get("worker_name", "").lower().strip()
         if wn and lm.get("ip"):
             worker_to_ip_map[wn] = lm["ip"]
+
+    # Hidden workers (manually cleaned-up stale entries)
+    hidden_keys = await _get_hidden_workers_set()
     
     account_stats = []
     api_errors = []
@@ -2831,26 +2922,33 @@ async def get_machine_monitor_watcher(force_refresh: bool = False):
                 worker_name_viabtc = w.get("worker_name", "")
                 hashrate = int(w.get("hashrate_1hour", 0) or 0)
                 status = w.get("worker_status", "")
-                
+
                 is_online = status == "active"
                 is_truly_offline = status in ["offline", "unactive"]
-                
+
+                # Skip workers that admin manually hid (stale entries after worker rename)
+                if is_truly_offline and _hidden_worker_key(display_name, worker_name_viabtc, "LTC") in hidden_keys:
+                    continue
+
                 if is_online:
                     ltc_online += 1
                     online_workers.append({"name": worker_name_viabtc, "coin": "LTC", "hashrate": hashrate})
                 elif is_truly_offline:
                     ltc_offline += 1
                     offline_workers.append({"name": worker_name_viabtc, "coin": "LTC", "status": status})
-            
+
             # Process KAS workers
             for w in kas_result.get("workers", []):
                 worker_name_viabtc = w.get("worker_name", "")
                 hashrate = int(w.get("hashrate_1hour", 0) or 0)
                 status = w.get("worker_status", "")
-                
+
                 is_online = status == "active"
                 is_truly_offline = status in ["offline", "unactive"]
-                
+
+                if is_truly_offline and _hidden_worker_key(display_name, worker_name_viabtc, "KAS") in hidden_keys:
+                    continue
+
                 if is_online:
                     kas_online += 1
                     online_workers.append({"name": worker_name_viabtc, "coin": "KAS", "hashrate": hashrate})
@@ -3142,6 +3240,17 @@ async def get_machine_monitor(force_refresh: bool = False, mode: str = "api"):
     kas_total_offline = 0
     all_online_details = []
     all_offline_details = []
+
+    # Hidden workers (manually cleaned-up stale entries)
+    hidden_keys = await _get_hidden_workers_set()
+
+    # Build worker -> IP map from PC-sync live data so offline cards can show the IP
+    live_machines_data = await db.machine_live_data.find({}, {"_id": 0, "worker_name": 1, "ip": 1}).to_list(10000)
+    worker_to_ip_map = {}
+    for lm in live_machines_data:
+        wn = (lm.get("worker_name") or "").lower().strip()
+        if wn and lm.get("ip"):
+            worker_to_ip_map[wn] = lm["ip"]
     
     async with aiohttp.ClientSession() as session:
         async def fetch_account_data(acc_info):
@@ -3178,19 +3287,25 @@ async def get_machine_monitor(force_refresh: bool = False, mode: str = "api"):
                 wname = w.get("worker_name", w.get("name", ""))
                 hashrate = int(w.get("hashrate_1hour", 0) or 0)
                 status = w.get("worker_status", w.get("status", ""))
-                
+
+                if status in ["offline", "unactive"] and _hidden_worker_key(display_name, wname, "LTC") in hidden_keys:
+                    continue
+
                 if status == "active":
                     ltc_online += 1
                     online_workers.append({"name": wname, "coin": "LTC", "hashrate": hashrate})
                 elif status in ["offline", "unactive"]:
                     ltc_offline += 1
                     offline_workers.append({"name": wname, "coin": "LTC", "status": status, "last_active": w.get("last_active", 0)})
-            
+
             for w in kas_workers:
                 wname = w.get("worker_name", w.get("name", ""))
                 hashrate = int(w.get("hashrate_1hour", 0) or 0)
                 status = w.get("worker_status", w.get("status", ""))
-                
+
+                if status in ["offline", "unactive"] and _hidden_worker_key(display_name, wname, "KAS") in hidden_keys:
+                    continue
+
                 if status == "active":
                     kas_online += 1
                     online_workers.append({"name": wname, "coin": "KAS", "hashrate": hashrate})

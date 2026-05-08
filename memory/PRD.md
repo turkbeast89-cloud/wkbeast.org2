@@ -32,11 +32,14 @@ Full-stack application to manage a crypto mining farm. Core requirements include
 - CoinGecko crypto price integration
 
 ## Recent Changes (Feb 2026)
-- **wkbeast_sync.py - Change Worker fix**: Rewrote `change_worker` execution.
-  - Primary path: HTTP web UI (`get_miner_conf.cgi` → mutate pools[*].user → `set_miner_conf.cgi`) — persistent across reboots.
-  - Fallback: CGMiner API with corrected protocol (`{"command":"addpool","parameter":"url,user,pass"}` instead of broken `command|args` format), plus `disablepool` cleanup of old pools and proper status checks.
-  - Both Digest + Basic auth attempted; JSON + form-encoded POST fallback for legacy Antminer firmware.
-  - Detailed result strings reported back to dashboard so failures are diagnosable.
+- **Hide stale ViaBTC workers**: New endpoints `POST /api/viabtc/hide-worker`, `POST /api/viabtc/unhide-worker`, `GET /api/viabtc/hidden-workers`. New `db.hidden_workers` collection. Both `/admin/machine-monitor` and `/admin/machine-monitor-watcher` now filter hidden entries from offline lists and counts. Cache busts on hide/unhide.
+- **Frontend hide button**: Each card in the "Offline Machines" alert on Dashboard.jsx now has an `X` button to hide that stale entry permanently (until manually unhidden).
+- **switch-workers originals overwrite bug**: Fixed `/api/machine-data/switch-workers` to preserve previously-saved originals when a switch is already active, so Restore Workers actually restores to the *real* original worker.
+- **Pre-existing fix**: `worker_to_ip_map` was undefined in `/admin/machine-monitor` watcher mode (would NameError on offline workers). Now properly built from `machine_live_data`.
+- **wkbeast_sync.py - Change Worker fix v2 (validated on user's L9)**:
+  - Primary path: HTTP web UI (`get_miner_conf.cgi` → mutate pools[*].user → `set_miner_conf.cgi`) — persistent.
+  - POST timeout bumped to 60s; if it still times out, wait 20s + verify by re-reading config (handles Antminer firmware that restarts cgminer synchronously and drops the response).
+  - Fallback: CGMiner API with corrected protocol (separate `parameter` field).
 
 ## Pending Items
 - L1 Farm (Fluminer) scan slowness — add `bypass_cgminer` config flag for HTTP-only farms (P1)

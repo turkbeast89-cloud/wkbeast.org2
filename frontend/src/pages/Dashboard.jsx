@@ -6,7 +6,7 @@ import {
   DollarSign, TrendingUp, Users, Cpu, AlertCircle, 
   ArrowUpRight, ArrowDownRight, Pause, RefreshCw, Wifi, WifiOff,
   AlertTriangle, Server, ChevronDown, ChevronUp, Thermometer, 
-  Fan, Power, RotateCcw, Monitor, Zap
+  Fan, Power, RotateCcw, Monitor, Zap, X
 } from "lucide-react";
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, 
@@ -127,6 +127,24 @@ const Dashboard = () => {
   const handleRefreshMonitor = () => {
     setRefreshing(true);
     fetchMachineMonitor(true);  // Force refresh when clicking the button
+  };
+
+  const handleHideWorker = async (detail) => {
+    const label = `${detail.machine_name || detail.worker} (${detail.coin})`;
+    if (!window.confirm(`Hide stale worker "${label}" from the dashboard?\n\nThis only hides the entry — it does NOT touch the miner. ViaBTC auto-purges old workers after ~7 days.`)) {
+      return;
+    }
+    try {
+      await axios.post(`${API}/viabtc/hide-worker`, {
+        account: detail.worker || "",
+        machine_name: detail.machine_name || "",
+        coin: detail.coin || ""
+      });
+      toast.success(`Hidden: ${label}`);
+      fetchMachineMonitor(true);
+    } catch (e) {
+      toast.error(`Failed to hide worker: ${e?.response?.data?.detail || e.message}`);
+    }
   };
 
   if (loading) {
@@ -517,10 +535,10 @@ const Dashboard = () => {
                       return `${days}d ${hours % 24}h ago`;
                     })() : '';
                     return (
-                    <div key={idx} className="bg-[#0A0A0A] rounded-lg px-3 py-2 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <WifiOff size={14} className="text-[#EF4444]" />
-                        <div>
+                    <div key={idx} className="bg-[#0A0A0A] rounded-lg px-3 py-2 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <WifiOff size={14} className="text-[#EF4444] shrink-0" />
+                        <div className="min-w-0">
                           <span className="text-sm text-white font-medium">{detail.machine_name || detail.worker}</span>
                           <span className="text-xs text-gray-500 ml-2">({detail.worker})</span>
                           {detail.ip && (
@@ -531,9 +549,20 @@ const Dashboard = () => {
                           )}
                         </div>
                       </div>
-                      <span className={`text-xs px-2 py-0.5 rounded ${
-                        detail.coin === 'LTC' ? 'bg-gray-700 text-gray-300' : 'bg-teal-900 text-teal-300'
-                      }`}>{detail.coin}</span>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span className={`text-xs px-2 py-0.5 rounded ${
+                          detail.coin === 'LTC' ? 'bg-gray-700 text-gray-300' : 'bg-teal-900 text-teal-300'
+                        }`}>{detail.coin}</span>
+                        <button
+                          onClick={() => handleHideWorker(detail)}
+                          title="Hide this stale worker entry"
+                          aria-label="Hide stale worker"
+                          className="p-1 rounded hover:bg-[#EF4444]/20 text-gray-500 hover:text-[#EF4444] transition-colors"
+                          data-testid={`hide-offline-worker-${idx}`}
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
                     </div>
                     );
                   })}
