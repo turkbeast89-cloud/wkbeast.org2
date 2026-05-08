@@ -3326,6 +3326,35 @@ async def get_machine_monitor(force_refresh: bool = False, mode: str = "api"):
         api_ltc_on = api_ltc_off = api_kas_on = api_kas_off = 0
         api_online_details = []
         api_offline_details = []
+
+        # Build worker -> IP/model/farm lookup so offline cards can show details
+        live_machines_data_api = await db.machine_live_data.find({}, {"_id": 0, "worker_name": 1, "ip": 1, "model": 1, "farm": 1}).to_list(10000)
+        api_worker_to_ip_map = {}
+        api_worker_to_meta_map = {}
+        for lm in live_machines_data_api:
+            wn = (lm.get("worker_name") or "").lower().strip()
+            ip = lm.get("ip", "")
+            if not (wn and ip):
+                continue
+            meta = {"ip": ip, "model": lm.get("model", ""), "farm": lm.get("farm", "")}
+            if wn not in api_worker_to_ip_map:
+                api_worker_to_ip_map[wn] = ip
+                api_worker_to_meta_map[wn] = meta
+            for seg in wn.split("."):
+                if seg and not seg.isdigit() and seg not in api_worker_to_ip_map:
+                    api_worker_to_ip_map[seg] = ip
+                    api_worker_to_meta_map[seg] = meta
+
+        def _api_lookup(name: str, account_worker: str = "") -> dict:
+            n = (name or "").strip().lower()
+            if not n:
+                return {}
+            if n in api_worker_to_ip_map:
+                return api_worker_to_meta_map.get(n, {"ip": api_worker_to_ip_map[n]})
+            for seg in n.split("."):
+                if seg and not seg.isdigit() and seg in api_worker_to_ip_map:
+                    return api_worker_to_meta_map.get(seg, {"ip": api_worker_to_ip_map[seg]})
+            return {}
         
         async with aiohttp.ClientSession() as session:
             async def fetch_api_account(api_key, info):
@@ -3387,7 +3416,8 @@ async def get_machine_monitor(force_refresh: bool = False, mode: str = "api"):
                 if r["kas_online"] > 0:
                     api_online_details.append({"worker": dn, "worker_name": wn, "coin": "KAS", "machines": r["kas_online"], "hashrate": r["kas_hashrate"], "workers": [w for w in r["online_workers"] if w["coin"] == "KAS"]})
                 for ow in r["offline_workers"]:
-                    api_offline_details.append({"worker": dn, "worker_name": wn, "machine_name": ow["name"], "coin": ow["coin"], "reason": ow.get("status", "offline"), "last_active": ow.get("last_active", 0)})
+                    meta = _api_lookup(ow["name"], wn)
+                    api_offline_details.append({"worker": dn, "worker_name": wn, "machine_name": ow["name"], "coin": ow["coin"], "reason": ow.get("status", "offline"), "last_active": ow.get("last_active", 0), "ip": meta.get("ip", ""), "model": meta.get("model", ""), "farm": meta.get("farm", "")})
             elif r and r.get("error"):
                 api_errors_list.append({"account": r.get("account"), "worker_name": r.get("worker_name"), "reason": r.get("reason")})
         
@@ -3464,13 +3494,45 @@ async def get_machine_monitor(force_refresh: bool = False, mode: str = "api"):
     # Hidden workers (manually cleaned-up stale entries)
     hidden_keys = await _get_hidden_workers_set()
 
-    # Build worker -> IP map from PC-sync live data so offline cards can show the IP
-    live_machines_data = await db.machine_live_data.find({}, {"_id": 0, "worker_name": 1, "ip": 1}).to_list(10000)
+    # Build worker -> IP map from PC-sync live data so offline cards can show the IP.
+    # Also index by every dot-separated segment + farm + model so we can look up
+    # by partial name (e.g. ViaBTC reports "101x129" but PC sync has "nazihwk.101x129").
+    live_machines_data = await db.machine_live_data.find({}, {"_id": 0, "worker_name": 1, "ip": 1, "model": 1, "farm": 1}).to_list(10000)
     worker_to_ip_map = {}
+    worker_to_meta_map = {}  # ip -> {ip, model, farm}
+
+    def _index_lm(key, ip, meta):
+        if key and key not in worker_to_ip_map:
+            worker_to_ip_map[key] = ip
+            worker_to_meta_map[key] = meta
+
     for lm in live_machines_data:
         wn = (lm.get("worker_name") or "").lower().strip()
-        if wn and lm.get("ip"):
-            worker_to_ip_map[wn] = lm["ip"]
+        ip = lm.get("ip", "")
+        if not (wn and ip):
+            continue
+        meta = {"ip": ip, "model": lm.get("model", ""), "farm": lm.get("farm", "")}
+        _index_lm(wn, ip, meta)
+        # Index every dot-separated segment, skip pure numeric (avoid "001" collisions)
+        for seg in wn.split("."):
+            if seg and not seg.isdigit():
+                _index_lm(seg, ip, meta)
+
+    def _lookup_ip_for_worker(viabtc_name: str, account_worker: str = "") -> dict:
+        """Return {'ip', 'model', 'farm'} for a ViaBTC worker name using fuzzy match.
+        Returns {} if no confident match — better to show no IP than a wrong one.
+        """
+        n = (viabtc_name or "").strip().lower()
+        if not n:
+            return {}
+        # 1. exact match
+        if n in worker_to_ip_map:
+            return worker_to_meta_map.get(n, {"ip": worker_to_ip_map[n]})
+        # 2. by tail/head segment (skip pure numeric to avoid "001" collisions)
+        for seg in n.split("."):
+            if seg and not seg.isdigit() and seg in worker_to_ip_map:
+                return worker_to_meta_map.get(seg, {"ip": worker_to_ip_map[seg]})
+        return {}
     
     async with aiohttp.ClientSession() as session:
         async def fetch_account_data(acc_info):
@@ -3601,13 +3663,15 @@ async def get_machine_monitor(force_refresh: bool = False, mode: str = "api"):
                     })
                 
                 for ow in result["offline_workers"]:
-                    machine_ip = worker_to_ip_map.get(ow["name"].lower(), worker_to_ip_map.get(worker_name.lower(), ""))
+                    meta = _lookup_ip_for_worker(ow["name"], worker_name)
                     all_offline_details.append({
                         "worker": display_name, "worker_name": worker_name,
                         "machine_name": ow["name"], "coin": ow["coin"],
                         "reason": ow.get("status", "offline"),
                         "last_active": ow.get("last_active", 0),
-                        "ip": machine_ip
+                        "ip": meta.get("ip", ""),
+                        "model": meta.get("model", ""),
+                        "farm": meta.get("farm", "")
                     })
     
     total_online = ltc_total_online + kas_total_online

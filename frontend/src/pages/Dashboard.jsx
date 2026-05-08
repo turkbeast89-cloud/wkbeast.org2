@@ -564,6 +564,13 @@ const Dashboard = () => {
                           {detail.ip && (
                             <span className="text-xs text-cyan-400 ml-2 font-mono">{detail.ip}</span>
                           )}
+                          {(detail.model || detail.farm) && (
+                            <div className="text-[10px] text-gray-500 mt-0.5">
+                              {detail.model && <span>{detail.model}</span>}
+                              {detail.model && detail.farm && <span className="mx-1">·</span>}
+                              {detail.farm && <span className="text-purple-400">{detail.farm}</span>}
+                            </div>
+                          )}
                           {offlineDuration && (
                             <div className="text-xs text-[#EF4444]/80 mt-0.5">Offline since {offlineDuration}</div>
                           )}
