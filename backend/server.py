@@ -606,6 +606,8 @@ async def clear_original_for_ip(data: dict):
     """Forget the saved 'original worker' memory for one specific IP.
     Use this when you want to keep the temporary worker permanent (no restore).
     Body: {ip}
+    If clearing this leaves the originals list empty, the wallet switch is auto-deactivated
+    so the 'Restore Original Workers' button disappears.
     """
     ip = (data.get("ip") or "").strip()
     if not ip:
@@ -613,18 +615,24 @@ async def clear_original_for_ip(data: dict):
 
     switch_data = await db.wallet_switch.find_one({"id": "wallet_switch"}, {"_id": 0})
     if not switch_data:
-        return {"success": True, "removed": 0}
+        return {"success": True, "removed": 0, "switch_active": False}
 
     originals = switch_data.get("originals") or []
     new_originals = [o for o in originals if o.get("ip") != ip]
     removed = len(originals) - len(new_originals)
 
+    update_doc = {"originals": new_originals}
+    # Auto-deactivate the switch when no originals remain
+    if not new_originals:
+        update_doc["switched"] = False
+        update_doc["restored_at"] = datetime.now(timezone.utc).isoformat()
+
     await db.wallet_switch.update_one(
         {"id": "wallet_switch"},
-        {"$set": {"originals": new_originals}}
+        {"$set": update_doc}
     )
 
-    return {"success": True, "removed": removed}
+    return {"success": True, "removed": removed, "switch_active": bool(new_originals)}
 
 @api_router.get("/machine-data/commands")
 async def get_pending_commands(api_key: str = "", farm: str = ""):
