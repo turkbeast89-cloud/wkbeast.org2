@@ -142,19 +142,37 @@ def get_machine_data():
     
     miners = config.get("miners", [])
     print(f"[INFO] Found {len(miners)} miners in config")
+
+    # One-time debug: dump the FIRST miner's full JSON so we can see all available
+    # field names (worker, worker_name, label, etc). This helps diagnose mismatches.
+    if miners:
+        sample_keys = sorted(miners[0].keys())
+        print(f"[DEBUG] Sample miner JSON keys: {sample_keys}")
+        # Print the values of likely worker fields for the first 3 miners
+        for i, sample in enumerate(miners[:3]):
+            preview = {k: sample.get(k) for k in ("ip", "name", "worker", "worker_name", "pool_worker", "label", "custom_name") if k in sample}
+            print(f"[DEBUG] Miner {i}: {preview}")
     
     for miner in miners:
         ip = miner.get("ip", "")
         if not ip:
             continue
 
-        # MineFleet stores TWO fields per miner: `name` (label like "Miner-16") and
-        # `worker` (the actual pool worker like "edgardwk"). Always prefer `worker`,
-        # fall back to `name` only if worker is empty. The CGMiner live-detail fetch
-        # below may further override this with the real pool worker if reachable.
-        worker_field = (miner.get("worker") or "").strip()
-        name_field = (miner.get("name") or "").strip()
-        initial_worker = worker_field or name_field
+        # MineFleet stores multiple fields per miner. The actual pool worker may be
+        # stored under any of: worker, worker_name, pool_worker, custom_name, label.
+        # The `name` field is just an auto-generated label like "Miner-16" and should
+        # be the LAST resort. The CGMiner live-detail fetch below will further override
+        # this with the real pool worker if the miner is reachable on port 4028.
+        candidate_fields = ["worker", "worker_name", "pool_worker", "custom_name", "label"]
+        initial_worker = ""
+        for field in candidate_fields:
+            v = (miner.get(field) or "").strip()
+            if v and not v.lower().startswith("miner-"):
+                initial_worker = v
+                break
+        if not initial_worker:
+            # Last resort: use name field even if it's "Miner-XX"
+            initial_worker = (miner.get("name") or "").strip()
 
         machine = {
             "ip": ip,
