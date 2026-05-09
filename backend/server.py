@@ -733,6 +733,50 @@ async def rename_machine(data: dict):
         raise HTTPException(status_code=404, detail="Machine not found")
     return {"success": True}
 
+@api_router.get("/machine-data/search")
+async def search_machines(q: str = ""):
+    """Find machines by partial worker name OR IP match. Searches everything,
+    ignoring the customer filter. Useful for finding orphaned machines whose
+    worker_name was wiped or whose IP you can't remember.
+    """
+    q = (q or "").strip().lower()
+    if not q:
+        return {"success": False, "error": "query required", "results": []}
+
+    machines = await db.machine_live_data.find({}, {"_id": 0}).to_list(10000)
+    results = []
+    for m in machines:
+        ip = (m.get("ip") or "").lower()
+        wn = (m.get("worker_name") or "").lower()
+        farm = (m.get("farm") or "").lower()
+        model = (m.get("model") or "").lower()
+        # Match on any field
+        if q in ip or q in wn or q in farm or q in model:
+            results.append({
+                "ip": m.get("ip"),
+                "worker_name": m.get("worker_name") or "(empty)",
+                "model": m.get("model"),
+                "farm": m.get("farm"),
+                "status": m.get("status"),
+                "hashrate": m.get("hashrate"),
+                "updated_at": m.get("updated_at"),
+                "last_online_at": m.get("last_online_at"),
+            })
+
+    # Also check the hidden list (machines previously Removed via the panel)
+    hidden = await db.machine_hidden.find({}, {"_id": 0}).to_list(10000)
+    hidden_matches = [h for h in hidden if q in (h.get("ip") or "").lower()]
+
+    return {
+        "success": True,
+        "query": q,
+        "count": len(results),
+        "results": results,
+        "hidden_matches": hidden_matches,
+        "hidden_count": len(hidden_matches),
+    }
+
+
 @api_router.delete("/machine-data/{ip}")
 async def delete_machine(ip: str):
     """Remove a machine from live data and prevent it from coming back"""
