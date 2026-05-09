@@ -147,10 +147,18 @@ def get_machine_data():
         ip = miner.get("ip", "")
         if not ip:
             continue
-        
+
+        # MineFleet stores TWO fields per miner: `name` (label like "Miner-16") and
+        # `worker` (the actual pool worker like "edgardwk"). Always prefer `worker`,
+        # fall back to `name` only if worker is empty. The CGMiner live-detail fetch
+        # below may further override this with the real pool worker if reachable.
+        worker_field = (miner.get("worker") or "").strip()
+        name_field = (miner.get("name") or "").strip()
+        initial_worker = worker_field or name_field
+
         machine = {
             "ip": ip,
-            "worker_name": miner.get("name", ""),
+            "worker_name": initial_worker,
             "hashrate": miner.get("hashrate", 0),
             "status": miner.get("status", "unknown"),
             "model": miner.get("type", "Unknown"),
