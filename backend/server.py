@@ -742,6 +742,20 @@ async def delete_machine(ip: str):
     return {"success": True}
 
 
+@api_router.get("/machine-data/hidden")
+async def list_hidden_machines():
+    """List all PC-sync IPs that were 'Removed' via the Live Panel and are blocked from coming back."""
+    docs = await db.machine_hidden.find({}, {"_id": 0}).to_list(10000)
+    return {"success": True, "hidden": docs, "count": len(docs)}
+
+
+@api_router.delete("/machine-data/hidden/{ip}")
+async def unhide_machine(ip: str):
+    """Allow a previously-removed machine to be re-synced by PC sync next cycle."""
+    res = await db.machine_hidden.delete_one({"ip": ip})
+    return {"success": True, "removed": res.deleted_count}
+
+
 
 @api_router.post("/machine-data/switch-workers")
 async def switch_workers(data: dict):
