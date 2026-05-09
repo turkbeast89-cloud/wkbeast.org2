@@ -733,6 +733,113 @@ async def rename_machine(data: dict):
         raise HTTPException(status_code=404, detail="Machine not found")
     return {"success": True}
 
+@api_router.get("/machine-data/export-csv")
+async def export_machines_csv():
+    """Download a CSV backup of all machines (ip, worker_name, farm, model, status, last_online_at).
+    Use this to save a snapshot before doing a global worker switch so you can restore later.
+    """
+    machines = await db.machine_live_data.find({}, {"_id": 0}).to_list(10000)
+
+    import io
+    import csv
+    from fastapi.responses import StreamingResponse
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["ip", "worker_name", "farm", "model", "status", "last_online_at", "updated_at"])
+    for m in machines:
+        writer.writerow([
+            m.get("ip", ""),
+            m.get("worker_name", ""),
+            m.get("farm", ""),
+            m.get("model", ""),
+            m.get("status", ""),
+            m.get("last_online_at", ""),
+            m.get("updated_at", ""),
+        ])
+    buf.seek(0)
+    filename = f"wkbeast_machines_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.csv"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
+@api_router.post("/machine-data/import-csv")
+async def import_machines_csv(data: dict):
+    """Restore worker names from a previously-exported CSV.
+    Body: {
+      rows: [{ip, worker_name}, ...],
+      apply_to_miners: bool   # if true, also queues change_worker commands so the
+                              # PC sync script reconfigures the physical miners.
+                              # If false, only the database labels are updated.
+    }
+    Returns counts of (db_updated, commands_queued, skipped).
+    """
+    rows = data.get("rows") or []
+    apply_to_miners = bool(data.get("apply_to_miners", False))
+
+    if not rows:
+        raise HTTPException(status_code=400, detail="rows is empty")
+
+    db_updated = 0
+    commands_queued = 0
+    skipped = []
+
+    # Pre-load existing live data once for the apply_to_miners path
+    existing_by_ip = {}
+    if apply_to_miners:
+        live = await db.machine_live_data.find({}, {"_id": 0, "ip": 1, "worker_name": 1, "farm": 1}).to_list(10000)
+        existing_by_ip = {m["ip"]: m for m in live}
+
+    for r in rows:
+        ip = (r.get("ip") or "").strip()
+        new_name = (r.get("worker_name") or "").strip()
+        if not ip or not new_name:
+            skipped.append({"ip": ip, "worker_name": new_name, "reason": "empty ip or worker_name"})
+            continue
+
+        # 1) Update the DB row's worker_name + mark manually_renamed so PC sync
+        #    doesn't overwrite it on the next push.
+        res = await db.machine_live_data.update_one(
+            {"ip": ip},
+            {"$set": {"worker_name": new_name, "manually_renamed": True}},
+            upsert=False
+        )
+        if res.matched_count:
+            db_updated += 1
+        else:
+            skipped.append({"ip": ip, "worker_name": new_name, "reason": "ip not found in current DB"})
+            continue
+
+        # 2) Optionally queue a change_worker command so the physical miner is reconfigured
+        if apply_to_miners:
+            current_worker = (existing_by_ip.get(ip, {}).get("worker_name") or "").strip()
+            if current_worker.lower() == new_name.lower():
+                # Already correct on the miner side — skip
+                continue
+            farm = existing_by_ip.get(ip, {}).get("farm", "Main Farm")
+            await db.machine_commands.insert_one({
+                "id": str(uuid.uuid4()),
+                "ip": ip,
+                "action": "change_worker",
+                "params": {"worker_name": new_name},
+                "farm": farm,
+                "status": "pending",
+                "created_at": datetime.now(timezone.utc).isoformat()
+            })
+            commands_queued += 1
+
+    return {
+        "success": True,
+        "db_updated": db_updated,
+        "commands_queued": commands_queued,
+        "skipped": skipped,
+        "skipped_count": len(skipped),
+    }
+
+
 @api_router.get("/machine-data/search")
 async def search_machines(q: str = ""):
     """Find machines by partial worker name OR IP match. Searches everything,

@@ -6,7 +6,7 @@ import {
   DollarSign, TrendingUp, Users, Cpu, AlertCircle, 
   ArrowUpRight, ArrowDownRight, Pause, RefreshCw, Wifi, WifiOff,
   AlertTriangle, Server, ChevronDown, ChevronUp, Thermometer, 
-  Fan, Power, RotateCcw, Monitor, Zap, X
+  Fan, Power, RotateCcw, Monitor, Zap, X, Download, Upload
 } from "lucide-react";
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, 
@@ -101,6 +101,68 @@ const Dashboard = () => {
     } finally {
       setMismatchLoading(false);
     }
+  };
+
+  const handleExportMachines = () => {
+    // Direct browser download
+    const url = `${API}/machine-data/export-csv`;
+    window.open(url, "_blank");
+    toast.success("Backup CSV downloading...");
+  };
+
+  const handleImportMachines = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".csv,text/csv";
+    input.onchange = async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const lines = text.split(/\r?\n/).filter(Boolean);
+        if (lines.length < 2) { toast.error("CSV is empty"); return; }
+        const header = lines[0].toLowerCase().split(",");
+        const ipIdx = header.findIndex(h => h.trim() === "ip");
+        const wnIdx = header.findIndex(h => h.trim() === "worker_name");
+        if (ipIdx < 0 || wnIdx < 0) {
+          toast.error("CSV must have 'ip' and 'worker_name' columns");
+          return;
+        }
+        const rows = [];
+        for (let i = 1; i < lines.length; i++) {
+          const parts = lines[i].split(",");
+          const ip = (parts[ipIdx] || "").trim();
+          const wn = (parts[wnIdx] || "").trim();
+          if (ip && wn) rows.push({ ip, worker_name: wn });
+        }
+        if (!rows.length) { toast.error("No valid rows in CSV"); return; }
+
+        const apply = window.confirm(
+          `Found ${rows.length} machines in CSV.\n\n` +
+          `Click OK to BOTH update database labels AND queue change_worker commands ` +
+          `(physical miners get reconfigured back to the original worker names).\n\n` +
+          `Click Cancel to ONLY update database labels (no commands sent to miners).`
+        );
+
+        const res = await axios.post(`${API}/machine-data/import-csv`, {
+          rows,
+          apply_to_miners: apply
+        });
+        const d = res.data;
+        toast.success(
+          `Updated ${d.db_updated} DB row(s)` +
+          (apply ? ` · queued ${d.commands_queued} miner command(s)` : "") +
+          (d.skipped_count ? ` · skipped ${d.skipped_count}` : "")
+        );
+        if (d.skipped_count > 0) {
+          console.log("Import skipped rows:", d.skipped);
+        }
+        fetchLiveMachines();
+      } catch (err) {
+        toast.error(`Import failed: ${err?.response?.data?.detail || err.message}`);
+      }
+    };
+    input.click();
   };
 
   const fetchStats = async () => {
@@ -797,6 +859,28 @@ const Dashboard = () => {
                   All
                 </button>
               </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleExportMachines}
+                className="border-[#27272A] hover:bg-[#27272A] text-[#00E054]"
+                data-testid="export-machines-csv"
+                title="Download CSV backup of all IPs + worker names. Save this BEFORE doing a global wallet switch."
+              >
+                <Download size={14} className="mr-2" />
+                Export
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleImportMachines}
+                className="border-[#27272A] hover:bg-[#27272A] text-amber-400"
+                data-testid="import-machines-csv"
+                title="Restore worker names from a previously-exported CSV. Optionally pushes to miners."
+              >
+                <Upload size={14} className="mr-2" />
+                Import
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
