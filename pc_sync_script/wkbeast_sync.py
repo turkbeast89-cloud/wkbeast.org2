@@ -174,11 +174,18 @@ def get_machine_data():
             # Last resort: use name field even if it's "Miner-XX"
             initial_worker = (miner.get("name") or "").strip()
 
+        # Normalize status to lowercase since MineFleet reports "ONLINE"/"OFFLINE"/"CRASHED"
+        # but the website expects lowercase "online"/"offline"/"crashed".
+        raw_status = (miner.get("status") or "unknown").strip().lower()
+        # Map common variants to canonical values
+        if raw_status in ("active", "running", "mining"):
+            raw_status = "online"
+
         machine = {
             "ip": ip,
             "worker_name": initial_worker,
             "hashrate": miner.get("hashrate", 0),
-            "status": miner.get("status", "unknown"),
+            "status": raw_status,
             "model": miner.get("type", "Unknown"),
             "farm": FARM_NAME,
             "temperature": 0,

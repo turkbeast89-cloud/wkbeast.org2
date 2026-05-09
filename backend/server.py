@@ -630,8 +630,9 @@ async def get_live_machine_data(filter_customers: bool = True):
             m["original_worker"] = orig
 
     # Dedupe: when the same worker name appears on multiple rows (e.g. DHCP gave the
-    # miner a new IP), suppress the OLDER stale/offline row(s) IF a fresher row exists.
-    # If no fresh row exists for that worker, keep the offline row visible (genuinely offline).
+    # miner a new IP), suppress the OLDER stale row(s) IF a fresh row exists for that
+    # worker. A "fresh" row is one whose updated_at is recent (not stale), regardless
+    # of its status field — we trust freshness over a possibly outdated row.
     by_worker = {}
     for m in machines:
         wn = (m.get("worker_name") or "").strip().lower()
@@ -643,11 +644,11 @@ async def get_live_machine_data(filter_customers: bool = True):
     for wn, rows in by_worker.items():
         if len(rows) < 2:
             continue
-        # If any row is currently fresh (not stale), suppress all stale duplicates.
-        has_fresh = any(not r.get("stale") and r.get("status") == "online" for r in rows)
+        # If any row is fresh (recently updated by sync), suppress all stale duplicates.
+        has_fresh = any(not r.get("stale") for r in rows)
         if has_fresh:
             for r in rows:
-                if r.get("stale") or r.get("status") in ("offline", "crashed"):
+                if r.get("stale"):
                     suppressed_ips.add(r.get("ip"))
 
     machines = [m for m in machines if m.get("ip") not in suppressed_ips]
