@@ -3361,6 +3361,9 @@ async def get_machine_monitor(force_refresh: bool = False, mode: str = "api"):
         api_online_details = []
         api_offline_details = []
 
+        # Hidden workers (manually cleaned-up stale entries) - filter applies to API mode too
+        api_hidden_keys = await _get_hidden_workers_set()
+
         # Build worker -> IP/model/farm lookup so offline cards can show details
         live_machines_data_api = await db.machine_live_data.find({}, {"_id": 0, "worker_name": 1, "ip": 1, "model": 1, "farm": 1}).to_list(10000)
         api_worker_to_ip_map = {}
@@ -3406,10 +3409,13 @@ async def get_machine_monitor(force_refresh: bool = False, mode: str = "api"):
                 lo = ko = loff = koff = 0
                 on_w = []
                 off_w = []
+                display_name = info["display_name"]
                 for w in ltc_r.get("workers", []):
                     wn = w.get("worker_name", "")
                     hr = int(w.get("hashrate_1hour", 0) or 0)
                     st = w.get("worker_status", "")
+                    if st in ["offline", "unactive"] and _hidden_worker_key(display_name, wn, "LTC") in api_hidden_keys:
+                        continue
                     if st == "active":
                         lo += 1; on_w.append({"name": wn, "coin": "LTC", "hashrate": hr})
                     elif st in ["offline", "unactive"]:
@@ -3418,6 +3424,8 @@ async def get_machine_monitor(force_refresh: bool = False, mode: str = "api"):
                     wn = w.get("worker_name", "")
                     hr = int(w.get("hashrate_1hour", 0) or 0)
                     st = w.get("worker_status", "")
+                    if st in ["offline", "unactive"] and _hidden_worker_key(display_name, wn, "KAS") in api_hidden_keys:
+                        continue
                     if st == "active":
                         ko += 1; on_w.append({"name": wn, "coin": "KAS", "hashrate": hr})
                     elif st in ["offline", "unactive"]:
