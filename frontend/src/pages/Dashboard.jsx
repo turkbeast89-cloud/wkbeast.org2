@@ -1197,7 +1197,7 @@ const Dashboard = () => {
                               </button>
                               </>
                             )}
-                            {liveFilter === "all" && m.is_customer && (
+                            {m.is_customer && (
                               <button
                                 onClick={async () => {
                                   const name = m.worker_name || m.ip;
